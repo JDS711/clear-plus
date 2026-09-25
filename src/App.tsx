@@ -40,10 +40,8 @@ const TESTIMONIALS = [
 
 export default function App() {
   // === MODE ===
-    const [mode, setMode] = useState<Mode>('app');
-    } catch {}
-    return 'landing';
-  });
+  // === MODE ===
+  const [mode, setMode] = useState<Mode>('app');
 
   // === CORE STATE ===
   const [quitDate, setQuitDate] = useState<Date>(() => {
