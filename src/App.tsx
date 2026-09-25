@@ -40,12 +40,7 @@ const TESTIMONIALS = [
 
 export default function App() {
   // === MODE ===
-  const [mode, setMode] = useState<Mode>(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.get('app') === '1' || p.get('success') === 'true') return 'app';
-      const stored = localStorage.getItem('clear_mode');
-      if (stored === 'app') return 'app';
+    const [mode, setMode] = useState<Mode>('app');
     } catch {}
     return 'landing';
   });
