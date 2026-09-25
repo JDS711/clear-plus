@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Wind, Heart, Clock, DollarSign, Cigarette, X, Plus, Sparkles, Flame, Activity, Brain, Settings,
@@ -1431,7 +1432,8 @@ export default function App() {
         </div>
       )}
 
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'); *{font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial}`}</style>
+       <Analytics />
+       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'); *{font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial}`}</style>
     </div>
   );
 }
