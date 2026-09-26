@@ -1064,16 +1064,19 @@ const [journals, setJournals] = useState<JournalEntry[]>(() => {
             {activeTab === 'settings' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-7 space-y-6">
-                  <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
-                    <h2 className="text-[13px] font-bold mb-5 flex items-center gap-2"><Settings className="w-4 h-4" /> Settings • Cost • Stripe • PWA</h2>
-                    <div className="space-y-6">
-                      <div><label className="text-[11px] tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date & Time</label><input type="datetime-local" value={quitDate ? new Date(quitDate.getTime() - quitDate.getTimezoneOffset() * 60000).toISOString().slice(0,16) : ""}
-                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
-                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigs / day</label><input type="number" value={cigsPerDay} onChange={e => setCigsPerDay(Math.max(1, parseInt(e.target.value) || 1))} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack AUD</label><input type="number" value={costPerPack} onChange={e => setCostPerPack(Math.max(0, parseFloat(e.target.value) || 0))} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                        </div>
+                      <div className="rounded- bg-[#121214] border border-white/[0.06] p-6">
+      <h2 className="text- font-bold mb-5 flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</h2>
+      <div className="space-y-6">
+        <div><label className="text- tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date</label>
+          <div className="rounded- bg-white/[0.03] border border-white/[0.06] p-4">
+            <div className="text- font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text- uppercase font-bold text-white/30 mb-1.5 block">Cigs / day</label>
+              <div><label className="text- uppercase font-bold text-white/30 mb-1.5 block">Price / pack AUD</label>
+            </div>
+            <div className="mt-3 flex gap-1.5">{[20, 25, 30].map(s => (<button key={s} onClick={() => setPackSize(s)}
+          </div>
+        </div>
                         <div className="mt-3 flex gap-1.5">{[20, 25, 30].map(s => (<button key={s} onClick={() => setPackSize(s)} className={`flex-1 h-10 rounded-[12px] text-[12px] font-bold border ${packSize === s ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{s} / pack</button>))}</div>
                       </div>
 
