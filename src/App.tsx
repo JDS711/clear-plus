@@ -217,7 +217,7 @@ export default function App() {
   const openPaywall = (feature: string) => { setPaywallFeature(feature); setShowPaywall(true); };
 
   // === CALCS ===
-  const diffMs = Math.max(0, now.getTime() - quitDate.getTime());
+  const diffMs = quitDate ? Math.max(0, now.getTime() - quitDate.getTime()) : 0;
   const totalMins = Math.floor(diffMs / 60000);
   const days = Math.floor(totalMins / 1440);
   const hours = Math.floor((totalMins % 1440) / 60);
