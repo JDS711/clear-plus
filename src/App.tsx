@@ -129,17 +129,15 @@ export default function App() {
   const [shareType, setShareType] = useState<ShareType>('money');
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [cravings, setCravings] = useState<Craving[]>([
-    { id: '1', time: new Date(Date.now() - 1000 * 60 * 60 * 5), intensity: 8, trigger: 'Coffee break', passed: true, note: 'Went for walk' },
-    { id: '2', time: new Date(Date.now() - 1000 * 60 * 60 * 26), intensity: 5, trigger: 'Stress', passed: true },
-    { id: '3', time: new Date(Date.now() - 1000 * 60 * 60 * 50), intensity: 7, trigger: 'After meal', passed: true },
-    { id: '4', time: new Date(Date.now() - 1000 * 60 * 60 * 72), intensity: 9, trigger: 'Social', passed: false },
-  ]);
-  const [journals, setJournals] = useState<JournalEntry[]>([
-    { id: '1', date: new Date(Date.now() - 1000 * 60 * 60 * 20), mood: 'great', text: 'Day 2 – slept better than in months. Morning coffee without cigarette felt weird but good.' },
-    { id: '2', date: new Date(Date.now() - 1000 * 60 * 60 * 44), mood: 'tough', text: 'Craving hit hard after dinner. Used breathing exercise. It passed in 4 minutes.' },
-    { id: '3', date: new Date(Date.now() - 1000 * 60 * 60 * 80), mood: 'ok', text: 'Saved $120 already. Jar is filling. Thinking about Bali flights.' },
-  ]);
+  const [cravings, setCravings] = useState<Craving[]>(() => {
+  try { const s = localStorage.getItem('clear_cravings'); if(s) return JSON.parse(s).map((c:any)=>({...c, time:new Date(c.time)})); } catch {}
+  return [];
+});
+
+const [journals, setJournals] = useState<JournalEntry[]>(() => {
+  try { const s = localStorage.getItem('clear_journals'); if(s) return JSON.parse(s).map((j:any)=>({...j, date:new Date(j.date)})); } catch {}
+  return [];
+});
 
   // === EFFECTS ===
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
@@ -150,7 +148,7 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('clear_quitDate', quitDate.toISOString());
+      if (quitDate) localStorage.setItem('clear_quitDate', quitDate.toISOString());
       localStorage.setItem('clear_cigsPerDay', String(cigsPerDay));
       localStorage.setItem('clear_costPerPack', String(costPerPack));
       localStorage.setItem('clear_packSize', String(packSize));
