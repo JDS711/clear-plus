@@ -45,9 +45,9 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('app');
 
   // === CORE STATE ===
-  const [quitDate, setQuitDate] = useState<Date>(() => {
+  const [quitDate, setQuitDate] = useState<Date | null>(() => {
     try { const s = localStorage.getItem('clear_quitDate'); if (s) return new Date(s); } catch {}
-    const d = new Date(); d.setDate(d.getDate() - 3); d.setHours(d.getHours() - 5); return d;
+    return null;
   });
   const [cigsPerDay, setCigsPerDay] = useState(() => {
     try { const v = localStorage.getItem('clear_cigsPerDay'); return v ? parseInt(v) : 20; } catch { return 20; }
