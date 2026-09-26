@@ -130,12 +130,24 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const [cravings, setCravings] = useState<Craving[]>(() => {
-  try { const s = localStorage.getItem('clear_cravings'); if(s) return JSON.parse(s).map((c:any)=>({...c, time:new Date(c.time)})); } catch {}
+  try {
+    const s = localStorage.getItem('clear_cravings');
+    if (s) {
+      const parsed = JSON.parse(s);
+      return parsed.map((c: any) => ({ ...c, time: new Date(c.time) }));
+    }
+  } catch {}
   return [];
 });
 
 const [journals, setJournals] = useState<JournalEntry[]>(() => {
-  try { const s = localStorage.getItem('clear_journals'); if(s) return JSON.parse(s).map((j:any)=>({...j, date:new Date(j.date)})); } catch {}
+  try {
+    const s = localStorage.getItem('clear_journals');
+    if (s) {
+      const parsed = JSON.parse(s);
+      return parsed.map((j: any) => ({ ...j, date: new Date(j.date) }));
+    }
+  } catch {}
   return [];
 });
 
