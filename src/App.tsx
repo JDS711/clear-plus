@@ -1057,7 +1057,7 @@ export default function App() {
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <h2 className="text-[13px] font-bold mb-5 flex items-center gap-2"><Settings className="w-4 h-4" /> Settings • Cost • Stripe • PWA</h2>
                     <div className="space-y-6">
-                      <div><label className="text-[11px] tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date & Time</label><input type="datetime-local" value={new Date(quitDate.getTime() - quitDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16)} onChange={e => setQuitDate(new Date(e.target.value))} className="w-full h-11 px-4 rounded-[12px] bg-white/[0.06] border border-white/[0.10] text-[13px] focus:outline-none focus:border-white/20" /></div>
+                      <div><label className="text-[11px] tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date & Time</label><input type="datetime-local" value={quitDate ? new Date(quitDate.getTime() - quitDate.getTimezoneOffset() * 60000).toISOString().slice(0,16) : ""}
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
                         <div className="grid grid-cols-2 gap-3">
