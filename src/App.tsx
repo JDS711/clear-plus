@@ -728,13 +728,13 @@ export default function App() {
           {/* App Header */}
           <header className="relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] bg-[#0e0e10]/90 backdrop-blur-2xl sticky top-0">
             <div className="flex items-center gap-4">
-              <button onClick={() => setMode('landing')} className="w-9 h-9 rounded-[12px] bg-white text-black flex items-center justify-center font-bold shadow-[0_0_20px_rgba(255,255,255,0.15)]"><Wind className="w-5 h-5" /></button>
+              <button onClick={() => { if(localStorage.getItem('clear_isFounder')==='true') setMode('landing') }} className="w-9 h-9 rounded-[12px] bg-white text-black flex items-center justify-center font-bold shadow-[0_0_20px_rgba(255,255,255,0.15)]"><Wind className="w-5 h-5" /></button>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">Clear</span>
                   <span className="text-[10px] tracking-[0.16em] font-bold px-2 py-0.5 rounded-full bg-white text-black">+</span>
                   {isPremium && <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/20 text-emerald-300"><Crown className="w-3 h-3" /> PLUS</span>}
-                  <button onClick={() => setMode('landing')} className="hidden sm:flex text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40 hover:text-white/70">Landing</button>
+                  <button onClick={() => { if(localStorage.getItem('clear_isFounder')==='true') setMode('landing') }} className="hidden sm:flex text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40 hover:text-white/70">Landing</button>
                 </div>
                 <div className="text-[11px] text-white/40 mt-0.5 hidden sm:block tracking-wide">By a former smoker, for future non-smokers • {referral ? `ref: ${referral}` : 'App Mode'}</div>
               </div>
