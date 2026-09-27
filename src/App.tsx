@@ -140,22 +140,26 @@ export default function App() {
     }
   } catch {}
   return [];
-});
-      return parsed.map((c: any) => ({ ...c, time: new Date(c.time) }));
-    }
-  } catch {}
-  return [];
-});
+  const [cravings, setCravings] = useState<Craving[]>(() => {
+    try {
+      const s = localStorage.getItem('clear_cravings');
+      if (s) {
+        const parsed = JSON.parse(s);
+        return parsed.map((c: any) => ({ ...c, time: new Date(c.time) }));
+      }
+    } catch {}
+    return [];
+  });
   const [journals, setJournals] = useState<JournalEntry[]>(() => {
-  try {
-    const s = localStorage.getItem('clear_journals');
-    if (s) {
-      const parsed = JSON.parse(s);
-      return parsed.map((j: any) => ({ ...j, date: new Date(j.date) }));
-    }
-  } catch {}
-  return [];
-});
+    try {
+      const s = localStorage.getItem('clear_journals');
+      if (s) {
+        const parsed = JSON.parse(s);
+        return parsed.map((j: any) => ({ ...j, date: new Date(j.date) }));
+      }
+    } catch {}
+    return [];
+  });
 
   // === EFFECTS ===
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
