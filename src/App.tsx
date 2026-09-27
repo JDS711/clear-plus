@@ -131,9 +131,16 @@ export default function App() {
 
   const [cravings, setCravings] = useState<Craving[]>(() => {
   try {
+    const [cravings, setCravings] = useState<Craving[]>(() => {
+  try {
     const s = localStorage.getItem('clear_cravings');
     if (s) {
       const parsed = JSON.parse(s);
+      return parsed.map((c: any) => ({ ...c, time: new Date(c.time) }));
+    }
+  } catch {}
+  return [];
+});
       return parsed.map((c: any) => ({ ...c, time: new Date(c.time) }));
     }
   } catch {}
