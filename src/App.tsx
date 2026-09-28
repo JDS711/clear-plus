@@ -1061,7 +1061,7 @@ export default function App() {
             )}
 
             {activeTab === 'settings' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6"><div className="bg-red-500 text-white p-4">TEST - if you see this, Settings is loading</div>
                 <div className="lg:col-span-7 space-y-6">
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <h2 className="text-[13px] font-bold mb-5 flex items-center gap-2"><Settings className="w-4 h-4" /> Settings • Cost • Stripe • PWA</h2>
