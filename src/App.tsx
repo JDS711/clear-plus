@@ -46,7 +46,11 @@ export default function App() {
 
   // === CORE STATE ===
   const [quitDate, setQuitDate] = useState<Date | null>(() => {
-    try { const s = localStorage.getItem('clear_quitDate'); if (s) return new Date(s); } catch {}
+    try {
+      const stored = localStorage.getItem('clear_quitDate');
+      const date = stored ? new Date(stored) : null;
+      if (date && Number.isFinite(date.getTime())) return date;
+    } catch {}
     return null;
   });
   const [cigsPerDay, setCigsPerDay] = useState(() => {
@@ -159,7 +163,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('clear_quitDate', quitDate.toISOString());
+      if (quitDate && Number.isFinite(quitDate.getTime())) {
+        localStorage.setItem('clear_quitDate', quitDate.toISOString());
+      } else {
+        localStorage.removeItem('clear_quitDate');
+      }
       localStorage.setItem('clear_cigsPerDay', String(cigsPerDay));
       localStorage.setItem('clear_costPerPack', String(costPerPack));
       localStorage.setItem('clear_packSize', String(packSize));
@@ -381,7 +389,7 @@ export default function App() {
     ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '600 14px Inter'; ctx.fillText('CRAVINGS BEATEN', 560, 600);
     ctx.fillStyle = '#6EE7B7'; ctx.font = '800 28px Inter'; ctx.fillText(`${cravingsPassed}`, 560, 640);
     ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '600 14px Inter'; ctx.fillText('STARTED', 800, 600);
-    ctx.fillStyle = 'white'; ctx.font = '700 18px Inter'; ctx.fillText(quitDate.toLocaleDateString('en-AU'), 800, 640);
+    ctx.fillStyle = 'white'; ctx.font = '700 18px Inter'; ctx.fillText((quitDate ? quitDate.toLocaleDateString('en-AU') : 'Not set'), 800, 640);
     // quote
     ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'italic 500 22px Inter'; ctx.fillText(`"${QUOTES[days % QUOTES.length]}"`, 64, 780);
     // QR placeholder + footer
@@ -1061,12 +1069,22 @@ export default function App() {
             )}
 
             {activeTab === 'settings' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6"><div className="bg-red-500 text-white p-4">TEST - if you see this, Settings is loading</div>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-7 space-y-6">
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <h2 className="text-[13px] font-bold mb-5 flex items-center gap-2"><Settings className="w-4 h-4" /> Settings • Cost • Stripe • PWA</h2>
                     <div className="space-y-6">
-                      <div><label className="text-[11px] tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date & Time</label><input type="datetime-local" value={quitDate ? new Date(quitDate.getTime() - quitDate.getTimezoneOffset() * 60000).toISOString().slice(0,16) : ''} onChange={e => setQuitDate(e.target.value ? new Date(e.target.value) : new Date())} />
+                      <div>
+                        <label htmlFor="quit-date" className="text-[11px] tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date & Time</label>
+                        <input id="quit-date" type="datetime-local"
+                          value={quitDate && Number.isFinite(quitDate.getTime()) ? new Date(quitDate.getTime() - quitDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}
+                          onChange={e => {
+                            const date = e.target.value ? new Date(e.target.value) : null;
+                            setQuitDate(date && Number.isFinite(date.getTime()) ? date : null);
+                          }}
+                          className="w-full min-w-0 h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px] [color-scheme:dark]"
+                        />
+                      </div>
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
                         <div className="grid grid-cols-2 gap-3">
@@ -1446,3 +1464,4 @@ export default function App() {
     </div>
   );
 }
+
