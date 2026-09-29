@@ -80,9 +80,9 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [founderPhoto, setFounderPhoto] = useState<string | null>(null);
   const [showSuccessCelebration, setShowSuccessCelebration] = useState(false);
-  const [globalSavedCounter, setGlobalSavedCounter] = useState(2418329);
+  // The fabricated "community saved" counter was removed deliberately. It was never
+  // rendered, and no such aggregate exists. Do not reintroduce invented social proof.
   const [utm, setUtm] = useState<Record<string, string>>({});
   const [referral, setReferral] = useState<string>('');
 
@@ -192,7 +192,6 @@ export default function App() {
           });
         }
       }
-      const fp = localStorage.getItem('clear_founder_photo'); if (fp) setFounderPhoto(fp);
     } catch {}
   }, []);
 
