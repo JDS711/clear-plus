@@ -47,9 +47,15 @@ export default function App() {
   const [packSize, setPackSize] = useState(() => {
     try { const v = localStorage.getItem('clear_packSize'); return v ? parseInt(v) : 25; } catch { return 25; }
   });
-  const [isPremium, setIsPremium] = useState(() => {
-    try { return localStorage.getItem('clear_isPremium') === 'true'; } catch { return false; }
-  });
+  // Premium is NEVER read from storage.
+  //
+  // It used to be `localStorage.getItem('clear_isPremium') === 'true'`, which meant anyone could
+  // open devtools, run localStorage.setItem('clear_isPremium','true'), reload, and have a free
+  // permanent subscription. A boolean the user can edit is not an entitlement.
+  //
+  // It is now derived from a server check on every load — see the session_id handling below.
+  // It starts false and stays false until Stripe says otherwise.
+  const [isPremium, setIsPremium] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState('Premium Analytics');
@@ -120,12 +126,13 @@ export default function App() {
       localStorage.setItem('clear_cigsPerDay', String(cigsPerDay));
       localStorage.setItem('clear_costPerPack', String(costPerPack));
       localStorage.setItem('clear_packSize', String(packSize));
-      localStorage.setItem('clear_isPremium', String(isPremium));
+      // `clear_isPremium` is deliberately NOT written any more. Entitlement lives in Stripe, not
+      // in the browser; mirroring it here is what made the flag worth forging.
       localStorage.setItem('clear_sosUses', JSON.stringify({ date: new Date().toDateString(), count: sosUses }));
       localStorage.setItem('clear_mode', mode);
       if (referral) localStorage.setItem('clear_referral', referral);
     } catch {}
-  }, [quitDate, cigsPerDay, costPerPack, packSize, isPremium, sosUses, mode, referral]);
+  }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral]);
 
   useEffect(() => {
     try {
@@ -144,11 +151,38 @@ export default function App() {
         const r = localStorage.getItem('clear_referral'); if (r) setReferral(r);
       }
       const sessionId = p.get('session_id');
+
       if (sessionId) {
+        // Straight after payment. Verify with Stripe, then REMEMBER THE SESSION ID — that is the
+        // credential every future load re-checks. No boolean is stored.
         fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId)).then(r => r.json()).then(data => {
-          if (data.paid) { setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true); }
-          else pushToast({ title: 'Payment not confirmed', body: 'Please check your payment receipt.' });
+          if (data.paid) {
+            setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true);
+            try { localStorage.setItem('clear_premium_session', sessionId); } catch {}
+          } else {
+            pushToast({ title: 'Payment not confirmed', body: 'Please check your payment receipt.' });
+          }
         }).catch(() => pushToast({ title: 'Unable to verify payment', body: 'Keep your receipt and retry this page.' }));
+      } else {
+        // Every other load: re-verify the stored session against Stripe.
+        //
+        // This is the fix. A hand-written `clear_isPremium` now accomplishes nothing — that key is
+        // never read — and a cancelled or refunded subscription loses access here, instead of
+        // keeping it forever.
+        let storedSession = null;
+        try { storedSession = localStorage.getItem('clear_premium_session'); } catch {}
+
+        if (storedSession) {
+          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(storedSession)).then(r => r.json()).then(data => {
+            setIsPremium(!!data.paid);
+            if (data.paid && data.billing) setBilling(data.billing);
+            // Drop a credential Stripe no longer honours, so we stop re-checking a dead session.
+            if (!data.paid) { try { localStorage.removeItem('clear_premium_session'); } catch {} }
+          }).catch(() => {
+            // Offline, or the server is unreachable. Premium is deliberately left OFF rather than
+            // trusting local state, because any local grant is forgeable. See the handover note.
+          });
+        }
       }
       const fp = localStorage.getItem('clear_founder_photo'); if (fp) setFounderPhoto(fp);
     } catch {}
