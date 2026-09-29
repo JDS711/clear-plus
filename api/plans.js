@@ -10,23 +10,18 @@ import { planAvailability } from '../lib/plans.js';
 // Hiding a plan that could have sold is worse than showing one that fails, so this endpoint is
 // never allowed to be the thing that costs a sale.
 //
-// Cached briefly in-process: the paywall only asks when it opens, and this keeps a burst of
-// opens from turning into a burst of Stripe calls.
-
-const TTL_MS = 60_000;
-let cache = { at: 0, value: null };
+// There is deliberately NO cache here. One was tried, with a 60 second lifetime, and it caused
+// more confusion than it saved: a new deployment rolls out across instances over a short window,
+// so different instances could answer from different builds, and the paywall appeared to hide a
+// plan that was in fact available. The endpoint is only called when the paywall opens, so the
+// Stripe calls it makes are trivial - not worth a stale answer for.
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({});
 
   try {
-    const now = Date.now();
-    if (cache.value && now - cache.at < TTL_MS) return res.status(200).json(cache.value);
-
-    const value = await planAvailability();
-    cache = { at: now, value };
-    return res.status(200).json(value);
+    return res.status(200).json(await planAvailability());
   } catch {
     // Unknown, not "nothing works". The client treats {} as "show everything".
     return res.status(200).json({});
