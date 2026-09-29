@@ -60,6 +60,24 @@ export default function App() {
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState('Premium Analytics');
   const [billing, setBilling] = useState<'monthly' | 'yearly' | 'lifetime'>('yearly');
+
+  // Which plans Stripe will actually accept, reported by /api/plans when the paywall opens.
+  // null means "not asked yet, or no usable answer".
+  const [planAvailability, setPlanAvailability] = useState<Record<string, boolean> | null>(null);
+
+  // Plans the paywall must not advertise.
+  //
+  // Only an explicit `false` hides a plan. A missing answer leaves everything visible, because
+  // hiding a plan that could have sold costs a sale while showing a broken one only costs a click.
+  // If EVERY plan reports unavailable we distrust the report entirely: that is far more likely to
+  // be a Stripe hiccup than all three prices genuinely going dead at the same moment.
+  const allPlans = ['monthly', 'yearly', 'lifetime'] as const;
+  const unavailablePlans = planAvailability
+    ? allPlans.filter((p) => planAvailability[p] === false)
+    : [];
+  const hiddenPlanSet = new Set<string>(
+    unavailablePlans.length === allPlans.length ? [] : unavailablePlans
+  );
   const [now, setNow] = useState(new Date());
   const [showSOSFull, setShowSOSFull] = useState(false);
   const [showCravingForm, setShowCravingForm] = useState(false);
@@ -195,6 +213,23 @@ export default function App() {
     } catch {}
   }, []);
 
+  // Ask which plans Stripe will actually accept, but only when the paywall opens.
+  // Asking on every page load would mean three Stripe calls per visitor for a question that only
+  // matters at the moment of purchase.
+  useEffect(() => {
+    if (!showPaywall || planAvailability) return;
+    let cancelled = false;
+    fetch('/api/plans')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data === 'object') setPlanAvailability(data);
+      })
+      .catch(() => {
+        // Leave availability unknown. Every plan stays visible rather than silently disappearing.
+      });
+    return () => { cancelled = true; };
+  }, [showPaywall, planAvailability]);
+
   useEffect(() => {
     const onBeforeInstall = (e: any) => { e.preventDefault(); setDeferredPrompt(e); };
     const onInstalled = () => { setIsInstalled(true); setDeferredPrompt(null); };
@@ -265,6 +300,12 @@ export default function App() {
   const addJournal = () => { if (!journalText.trim()) return; setJournals([{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals]); setJournalText(''); pushToast({ title: 'Journal saved', body: 'Your entry is stored locally. Keep going!' }); };
 
   const handleCheckout = async (plan: 'monthly' | 'yearly' | 'lifetime') => {
+    // Refuse a plan the server has already told us Stripe will reject, so the customer gets a
+    // sentence instead of a dead end.
+    if (hiddenPlanSet.has(plan)) {
+      pushToast({ title: 'Plan unavailable', body: 'That plan is temporarily unavailable. The other plans are unaffected.' });
+      return;
+    }
     try {
       pushToast({ title: 'Opening secure checkout', body: 'Review your plan in Stripe before paying.' });
       const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billing: plan }) });
@@ -696,7 +737,7 @@ export default function App() {
         </>
       )}
 
-      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Unlimited craving logs, savings charts and progress rewards. Your free timer, calculator and five-minute pause remain available.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">Progress is stored in this browser. Clearing browser data removes saved progress.</p></section></div>}
+      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Unlimited craving logs, savings charts and progress rewards. Your free timer, calculator and five-minute pause remain available.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">Progress is stored in this browser. Clearing browser data removes saved progress.</p></section></div>}
 
       {/* Share Modal */}
       {showShare && (
