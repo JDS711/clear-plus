@@ -136,6 +136,14 @@ export default function App() {
 
   useEffect(() => {
     try {
+      // One-time cleanup of the dead entitlement flag.
+      //
+      // `clear_isPremium` used to be the source of truth, so every returning user still carries it
+      // in their browser. Nothing reads it any more, but leaving a forgeable-looking entitlement
+      // flag lying around invites someone to later "fix" it back into the code, and it is stale
+      // state we no longer own. Removing it is safe precisely because nothing reads the key.
+      try { localStorage.removeItem('clear_isPremium'); } catch {}
+
       const p = new URLSearchParams(window.location.search);
       const utmObj: Record<string, string> = {};
       ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'ref', 'fbclid', 'gclid'].forEach(k => {
