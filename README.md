@@ -1,48 +1,93 @@
-# Clear+ — Deploy + Stripe LIVE
+# Clear+ — Deploy + Stripe
 
-## FINAL PRICING - prod_VH8JKn97ec1n57
-- Monthly: price_1UGa3KRsZqvWlIOHvkRsX1TM = $9.99/mo (standard_monthly)
-- Yearly: price_1UGawQRsZqvWlIOHGpXi1NJl = $29.95/yr (yearly_29_95) BEST VALUE Save 75%
-- Lifetime: price_1UGac6RsZqvWlIOHbwlEO7Yv = $49.95 once (lifetime_founder_100) First 100 Only
+## Pricing
 
-Final copy:
-> No dark patterns, no guilt trips, no ads selling you vapes. Free tier is actually useful.
-> Plus from $9.99 a month. $29.95 a year. Or for a limited time only, the first 100 receive a lifetime membership for $49.95.
+| Plan | Price |
+| --- | --- |
+| Monthly | AUD $9.99 / month |
+| Yearly | AUD $29.95 / year |
+| Lifetime | AUD $49.95 once |
 
-## Deploy to Vercel (5 mins)
+Stripe price and product IDs are **not listed in this README**. They belong in environment variables:
 
-1. Install Vercel CLI: npm i -g vercel
-2. In this folder: vercel
-3. Add env vars in Vercel Dashboard > Settings > Environment Variables:
-   - STRIPE_SECRET_KEY
-   - STRIPE_PUBLISHABLE_KEY
-   - STRIPE_MONTHLY_PRICE_ID
-   - STRIPE_YEARLY_PRICE_ID
-   - STRIPE_LIFETIME_PRICE_ID
-4. Deploy: vercel --prod
-5. Connect domain clearplus.app in Vercel Domains
+- `STRIPE_MONTHLY_PRICE_ID`
+- `STRIPE_YEARLY_PRICE_ID`
+- `STRIPE_LIFETIME_PRICE_ID`
 
-## How Stripe works now
+`lib/prices.js` resolves them server-side, so a plan name sent from the browser can never select a different price.
 
-- Frontend (App.tsx) calls /api/create-checkout with { billing: 'monthly'|'yearly'|'lifetime' }
-- api/create-checkout.js creates real Stripe Checkout Session
-- User pays on Stripe
-- Stripe redirects to /?success=true&billing=lifetime -> App.tsx auto-unlocks Premium
-- For lifetime, Founder Admin in Settings > tap +1
+**Still to do:** the three price IDs are currently hardcoded as fallback values inside `lib/prices.js`, which is why they remain visible in this public repository. Removing those fallbacks makes the env vars the single source of truth — see "Known gaps" below.
 
-## When you hit 100 lifetime sales
+## Deploy to Vercel
 
-Stripe Dashboard > Products > Clear Plus Premium > Price $49.95 > ... > Archive price
-This stops selling instantly. App will show Sold Out automatically when founderSold = 100.
+1. Install the CLI: `npm i -g vercel`
+2. In this folder: `vercel`
+3. Add these env vars in Vercel Dashboard > Settings > Environment Variables:
+   - `STRIPE_SECRET_KEY` (required — checkout and verification both fail without it)
+   - `STRIPE_MONTHLY_PRICE_ID`
+   - `STRIPE_YEARLY_PRICE_ID`
+   - `STRIPE_LIFETIME_PRICE_ID`
+4. Deploy: `vercel --prod`
+5. Connect the domain **clear-plus.app** in Vercel Domains
+
+`STRIPE_PUBLISHABLE_KEY` is not read by any code in this repo, so it is not required.
+
+`.env.example` does not exist yet. For local dev, create `.env.local` with the variables above — `.gitignore` already covers `.env*`.
+
+## How Stripe works
+
+- The frontend calls `POST /api/create-checkout` with `{ billing: 'monthly' | 'yearly' | 'lifetime' }`.
+- `api/create-checkout.js` creates the Checkout Session server-side and returns the Stripe URL.
+- Stripe redirects back to `/` with `?session_id=...`.
+- `GET /api/verify-checkout?session_id=...` asks Stripe directly whether that session is a real, still-current purchase, and returns `{ paid, billing }`.
+- Premium is granted **only** from that server answer. It is never read from or written to `localStorage`.
+- A cancelled or refunded subscription stops returning `paid: true`, so access is revoked on the next load.
+- Offline, or the server unreachable, leaves Premium off. The client fails closed rather than trusting local state.
+
+## Restore access
+
+There is currently **no self-serve restore path**. Premium is tied to the browser that completed the purchase, so clearing browser data, switching device or switching browser loses access. That is a refund and chargeback risk.
+
+Manual restore until this is built:
+
+1. Find the customer in the Stripe Dashboard.
+2. Send them the `session_id` from their payment as a link — for example `https://www.clear-plus.app/?session_id=cs_live_...`.
+
+Their browser re-verifies that session with Stripe on load and re-grants Premium. A magic-link email flow is the next proper step.
+
+## Lifetime pricing — no cap is enforced
+
+The lifetime plan is available to **everyone**. There is no "first 100" limit and no sold-out state:
+
+- Nothing in the app counts lifetime sales. There is no `founderSold` counter and no "Sold Out" UI.
+- `api/create-checkout.js` will sell the lifetime price to anyone who asks.
+
+**Do not advertise a first-100 limit until one is enforceable.** To make such an offer real, either:
+
+- create a Stripe promotion code for the lifetime price with `max_redemptions: 100` (and optionally `expires_at`), or
+- archive the lifetime price in the Stripe Dashboard once the cap is reached,
+
+and then have the app hide the plan, or show it as sold out. Stripe will not enforce a cap that does not exist.
+
+Note: the Stripe price nickname `lifetime_founder_100` reads like a cap and can appear on receipts and invoices. Rename it if you are not running a capped offer.
+
+## Known gaps
+
+- Price IDs remain hardcoded as fallbacks in `lib/prices.js`. Removing them requires confirming all three `STRIPE_*_PRICE_ID` variables are set in Vercel first, because a missing variable would otherwise break that plan's checkout and verification.
+- No restore path (above).
+- No `sitemap.xml` (below).
 
 ## SEO
 
-Title and meta description already set in index.html with your ethical copy.
-Submit https://clearplus.app/sitemap.xml to Google Search Console.
+Title and meta description are set in `index.html`.
+
+There is **no `sitemap.xml`** in this repo. Create one before submitting a sitemap URL to Google Search Console. The canonical domain is `www.clear-plus.app`.
 
 ## Local dev
 
+```bash
 npm install
 npm run dev
+```
 
-Set .env.local from .env.example
+`npm run build` runs the test suite first (`node --test lib/*.test.js`), then `vite build`. A failing test blocks the build.

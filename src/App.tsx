@@ -47,13 +47,37 @@ export default function App() {
   const [packSize, setPackSize] = useState(() => {
     try { const v = localStorage.getItem('clear_packSize'); return v ? parseInt(v) : 25; } catch { return 25; }
   });
-  const [isPremium, setIsPremium] = useState(() => {
-    try { return localStorage.getItem('clear_isPremium') === 'true'; } catch { return false; }
-  });
+  // Premium is NEVER read from storage.
+  //
+  // It used to be `localStorage.getItem('clear_isPremium') === 'true'`, which meant anyone could
+  // open devtools, run localStorage.setItem('clear_isPremium','true'), reload, and have a free
+  // permanent subscription. A boolean the user can edit is not an entitlement.
+  //
+  // It is now derived from a server check on every load — see the session_id handling below.
+  // It starts false and stays false until Stripe says otherwise.
+  const [isPremium, setIsPremium] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState('Premium Analytics');
   const [billing, setBilling] = useState<'monthly' | 'yearly' | 'lifetime'>('yearly');
+
+  // Which plans Stripe will actually accept, reported by /api/plans when the paywall opens.
+  // null means "not asked yet, or no usable answer".
+  const [planAvailability, setPlanAvailability] = useState<Record<string, boolean> | null>(null);
+
+  // Plans the paywall must not advertise.
+  //
+  // Only an explicit `false` hides a plan. A missing answer leaves everything visible, because
+  // hiding a plan that could have sold costs a sale while showing a broken one only costs a click.
+  // If EVERY plan reports unavailable we distrust the report entirely: that is far more likely to
+  // be a Stripe hiccup than all three prices genuinely going dead at the same moment.
+  const allPlans = ['monthly', 'yearly', 'lifetime'] as const;
+  const unavailablePlans = planAvailability
+    ? allPlans.filter((p) => planAvailability[p] === false)
+    : [];
+  const hiddenPlanSet = new Set<string>(
+    unavailablePlans.length === allPlans.length ? [] : unavailablePlans
+  );
   const [now, setNow] = useState(new Date());
   const [showSOSFull, setShowSOSFull] = useState(false);
   const [showCravingForm, setShowCravingForm] = useState(false);
@@ -74,9 +98,9 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [founderPhoto, setFounderPhoto] = useState<string | null>(null);
   const [showSuccessCelebration, setShowSuccessCelebration] = useState(false);
-  const [globalSavedCounter, setGlobalSavedCounter] = useState(2418329);
+  // The fabricated "community saved" counter was removed deliberately. It was never
+  // rendered, and no such aggregate exists. Do not reintroduce invented social proof.
   const [utm, setUtm] = useState<Record<string, string>>({});
   const [referral, setReferral] = useState<string>('');
 
@@ -120,15 +144,24 @@ export default function App() {
       localStorage.setItem('clear_cigsPerDay', String(cigsPerDay));
       localStorage.setItem('clear_costPerPack', String(costPerPack));
       localStorage.setItem('clear_packSize', String(packSize));
-      localStorage.setItem('clear_isPremium', String(isPremium));
+      // `clear_isPremium` is deliberately NOT written any more. Entitlement lives in Stripe, not
+      // in the browser; mirroring it here is what made the flag worth forging.
       localStorage.setItem('clear_sosUses', JSON.stringify({ date: new Date().toDateString(), count: sosUses }));
       localStorage.setItem('clear_mode', mode);
       if (referral) localStorage.setItem('clear_referral', referral);
     } catch {}
-  }, [quitDate, cigsPerDay, costPerPack, packSize, isPremium, sosUses, mode, referral]);
+  }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral]);
 
   useEffect(() => {
     try {
+      // One-time cleanup of the dead entitlement flag.
+      //
+      // `clear_isPremium` used to be the source of truth, so every returning user still carries it
+      // in their browser. Nothing reads it any more, but leaving a forgeable-looking entitlement
+      // flag lying around invites someone to later "fix" it back into the code, and it is stale
+      // state we no longer own. Removing it is safe precisely because nothing reads the key.
+      try { localStorage.removeItem('clear_isPremium'); } catch {}
+
       const p = new URLSearchParams(window.location.search);
       const utmObj: Record<string, string> = {};
       ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'ref', 'fbclid', 'gclid'].forEach(k => {
@@ -144,15 +177,58 @@ export default function App() {
         const r = localStorage.getItem('clear_referral'); if (r) setReferral(r);
       }
       const sessionId = p.get('session_id');
+
       if (sessionId) {
+        // Straight after payment. Verify with Stripe, then REMEMBER THE SESSION ID — that is the
+        // credential every future load re-checks. No boolean is stored.
         fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId)).then(r => r.json()).then(data => {
-          if (data.paid) { setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true); }
-          else pushToast({ title: 'Payment not confirmed', body: 'Please check your payment receipt.' });
+          if (data.paid) {
+            setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true);
+            try { localStorage.setItem('clear_premium_session', sessionId); } catch {}
+          } else {
+            pushToast({ title: 'Payment not confirmed', body: 'Please check your payment receipt.' });
+          }
         }).catch(() => pushToast({ title: 'Unable to verify payment', body: 'Keep your receipt and retry this page.' }));
+      } else {
+        // Every other load: re-verify the stored session against Stripe.
+        //
+        // This is the fix. A hand-written `clear_isPremium` now accomplishes nothing — that key is
+        // never read — and a cancelled or refunded subscription loses access here, instead of
+        // keeping it forever.
+        let storedSession = null;
+        try { storedSession = localStorage.getItem('clear_premium_session'); } catch {}
+
+        if (storedSession) {
+          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(storedSession)).then(r => r.json()).then(data => {
+            setIsPremium(!!data.paid);
+            if (data.paid && data.billing) setBilling(data.billing);
+            // Drop a credential Stripe no longer honours, so we stop re-checking a dead session.
+            if (!data.paid) { try { localStorage.removeItem('clear_premium_session'); } catch {} }
+          }).catch(() => {
+            // Offline, or the server is unreachable. Premium is deliberately left OFF rather than
+            // trusting local state, because any local grant is forgeable. See the handover note.
+          });
+        }
       }
-      const fp = localStorage.getItem('clear_founder_photo'); if (fp) setFounderPhoto(fp);
     } catch {}
   }, []);
+
+  // Ask which plans Stripe will actually accept, but only when the paywall opens.
+  // Asking on every page load would mean three Stripe calls per visitor for a question that only
+  // matters at the moment of purchase.
+  useEffect(() => {
+    if (!showPaywall || planAvailability) return;
+    let cancelled = false;
+    fetch('/api/plans')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data === 'object') setPlanAvailability(data);
+      })
+      .catch(() => {
+        // Leave availability unknown. Every plan stays visible rather than silently disappearing.
+      });
+    return () => { cancelled = true; };
+  }, [showPaywall, planAvailability]);
 
   useEffect(() => {
     const onBeforeInstall = (e: any) => { e.preventDefault(); setDeferredPrompt(e); };
@@ -224,6 +300,12 @@ export default function App() {
   const addJournal = () => { if (!journalText.trim()) return; setJournals([{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals]); setJournalText(''); pushToast({ title: 'Journal saved', body: 'Your entry is stored locally. Keep going!' }); };
 
   const handleCheckout = async (plan: 'monthly' | 'yearly' | 'lifetime') => {
+    // Refuse a plan the server has already told us Stripe will reject, so the customer gets a
+    // sentence instead of a dead end.
+    if (hiddenPlanSet.has(plan)) {
+      pushToast({ title: 'Plan unavailable', body: 'That plan is temporarily unavailable. The other plans are unaffected.' });
+      return;
+    }
     try {
       pushToast({ title: 'Opening secure checkout', body: 'Review your plan in Stripe before paying.' });
       const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billing: plan }) });
@@ -655,7 +737,7 @@ export default function App() {
         </>
       )}
 
-      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Unlimited craving logs, savings charts and progress rewards. Your free timer, calculator and five-minute pause remain available.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">Progress is stored in this browser. Clearing browser data removes saved progress.</p></section></div>}
+      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Unlimited craving logs, savings charts and progress rewards. Your free timer, calculator and five-minute pause remain available.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">Progress is stored in this browser. Clearing browser data removes saved progress.</p></section></div>}
 
       {/* Share Modal */}
       {showShare && (
