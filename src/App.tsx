@@ -1,4 +1,5 @@
 import Remodel from './Remodel';
+import { countDailyLogs, canSaveCraving } from '../lib/cravings.js';
 import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -91,10 +92,6 @@ export default function App() {
   const [breathRunning, setBreathRunning] = useState(false);
   const [breathCount, setBreathCount] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [sosUses, setSosUses] = useState(() => {
-    try { const raw = localStorage.getItem('clear_sosUses'); if (raw) { const o = JSON.parse(raw); if (o.date === new Date().toDateString()) return o.count; } } catch {}
-    return 0;
-  });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -146,11 +143,10 @@ export default function App() {
       localStorage.setItem('clear_packSize', String(packSize));
       // `clear_isPremium` is deliberately NOT written any more. Entitlement lives in Stripe, not
       // in the browser; mirroring it here is what made the flag worth forging.
-      localStorage.setItem('clear_sosUses', JSON.stringify({ date: new Date().toDateString(), count: sosUses }));
       localStorage.setItem('clear_mode', mode);
       if (referral) localStorage.setItem('clear_referral', referral);
     } catch {}
-  }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral]);
+  }, [quitDate, cigsPerDay, costPerPack, packSize, mode, referral]);
 
   useEffect(() => {
     try {
@@ -249,8 +245,22 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [breathPhase, breathRunning]);
 
+  // Leaving SOS must not leave a hidden exercise running or reopen the overlay.
+  useEffect(() => {
+    setBreathRunning(false);
+    setShowSOSFull(false);
+  }, [activeTab, mode]);
+
+  useEffect(() => {
+    const pauseWhenHidden = () => {
+      if (document.hidden) setBreathRunning(false);
+    };
+    document.addEventListener('visibilitychange', pauseWhenHidden);
+    return () => document.removeEventListener('visibilitychange', pauseWhenHidden);
+  }, []);
+
   const pushToast = (t: Omit<Toast, 'id'>) => { const id = Date.now().toString() + Math.random().toString(16).slice(2); setToasts(p => [...p.slice(-3), { ...t, id }]); setTimeout(() => setToasts(p => p.filter(x => x.id !== id)), 4000); };
-  const openPaywall = (feature: string) => { setPaywallFeature(feature); setShowPaywall(true); };
+  const openPaywall = (feature: string) => { setBreathRunning(false); setShowSOSFull(false); setPaywallFeature(feature); setShowPaywall(true); };
 
   // === CALCS ===
   const diffMs = quitDate ? Math.max(0, now.getTime() - quitDate.getTime()) : 0;
@@ -291,12 +301,18 @@ export default function App() {
     });
   }, [cravings]);
 
+  const sosUses = countDailyLogs(cravings, now);
   const addCraving = () => {
-    if (!isPremium && sosUses >= 3) { openPaywall('Unlimited SOS & Craving Log'); return; }
+    if (!canSaveCraving(cravings, isPremium)) { setShowCravingForm(false); openPaywall('You have saved your 3 free craving logs today. Breathing is always free.'); return; }
     const c: Craving = { id: Date.now().toString(), time: new Date(), intensity: cravingIntensity, trigger: cravingTrigger, passed: false, note: cravingNote.trim() || undefined };
-    setCravings([c, ...cravings]); setShowCravingForm(false); setCravingNote(''); setShowSOSFull(true); setBreathRunning(true); setBreathPhase('inhale'); setSosUses(s => s + 1);
+    setCravings(current => [c, ...current]); setShowCravingForm(false); setCravingNote(''); setShowSOSFull(false); setBreathRunning(false);
+    pushToast({ title: 'Craving saved', body: 'Start breathing whenever you are ready.' });
   };
-  const markCravingPassed = (id: string) => setCravings(cravings.map(c => c.id === id ? { ...c, passed: true } : c));
+  const markCravingPassed = (id: string) => {
+    setBreathRunning(false);
+    setShowSOSFull(false);
+    setCravings(current => current.map(c => c.id === id ? { ...c, passed: true } : c));
+  };
   const addJournal = () => { if (!journalText.trim()) return; setJournals([{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals]); setJournalText(''); pushToast({ title: 'Journal saved', body: 'Your entry is stored locally. Keep going!' }); };
 
   const handleCheckout = async (plan: 'monthly' | 'yearly' | 'lifetime') => {
@@ -549,8 +565,8 @@ export default function App() {
                 <div className="lg:col-span-7">
                   <div className="rounded-[28px] bg-[#131315] border border-white/[0.08] p-6 lg:p-8">
                     <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • 4-7-8</div><div className="text-[11px] text-white/40">Free • Unlimited with clear-plus1.0 • {sosUses}/3 today {isPremium ? '(Plus: unlimited)' : ''}</div></div></div>
-                      {!isPremium && sosUses >= 3 && <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300">Limit reached</span>}
+                      <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • 4-7-8</div><div className="text-[11px] text-white/40">Breathing is always free • {isPremium ? 'Unlimited craving logs' : `${sosUses}/3 craving logs today`}</div></div></div>
+                      {!isPremium && sosUses >= 3 && <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300">Daily log limit reached</span>}
                     </div>
                     <div className="flex flex-col items-center text-center py-6">
                       <div className="text-[11px] tracking-[0.2em] uppercase font-bold text-white/30">Round {breathCount + 1} • {breathPhase}</div>
@@ -562,8 +578,6 @@ export default function App() {
                       </div>
                       <div className="mt-8 flex items-center gap-3">
                         <button onClick={() => {
-                          if (!isPremium && sosUses >= 3) { openPaywall('Unlimited SOS'); return; }
-                          if (!breathRunning) setSosUses(s => s + 1);
                           setBreathRunning(!breathRunning);
                         }} className="h-12 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90">
                           {breathRunning ? <><Pause className="w-4 h-4" /> Pause</> : <><Play className="w-4 h-4" /> Start breathing</>}
@@ -572,7 +586,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="mt-6 flex gap-3">
-                      <button onClick={() => { const id = cravings.find(c => !c.passed)?.id; if (id) markCravingPassed(id); pushToast({ title: 'Craving beaten 💪', body: `${cravingsPassed + 1} cravings defeated.` }); }} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
+                      <button onClick={() => { const id = cravings.find(c => !c.passed)?.id; if (id) markCravingPassed(id); setBreathRunning(false); setShowSOSFull(false); pushToast({ title: 'Craving beaten 💪', body: 'Take a moment to recognise your progress.' }); }} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
                       <button onClick={() => setShowCravingForm(true)} className="h-12 px-5 rounded-full bg-white/[0.06] border border-white/[0.10] text-[13px]">Log craving</button>
                     </div>
                   </div>
@@ -692,11 +706,7 @@ export default function App() {
                         <div className="mt-3 flex gap-1.5">{[20, 25, 30].map(s => (<button key={s} onClick={() => setPackSize(s)} className={`flex-1 h-10 rounded-[12px] text-[12px] font-bold border ${packSize === s ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{s} / pack</button>))}</div>
                       </div>
 
-                      <div className="rounded-[16px] bg-[#101012] border border-white/[0.08] p-4">
-                        <div className="flex items-center justify-between mb-3"><div className="text-[11px] font-bold tracking-widest uppercase text-white/30 flex items-center gap-2"><Bell className="w-4 h-4 text-violet-300" /> UTM & Referral</div><span className="text-[10px] px-2 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40">{referral || 'no ref'}</span></div>
-                        <div className="text-[11px] text-white/40">Stored locally. Landing → App handoff keeps ref. Displayed for launch tracking.</div>
-                        {Object.keys(utm).length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{Object.entries(utm).map(([k, v]) => <span key={k} className="px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[10px]">{k}={v}</span>)}</div>}
-                      </div>
+
                     </div>
                   </div>
                 </div>
@@ -709,7 +719,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Timer, basic savings, 3 SOS/day, 7-day history</div></div>
+                        <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Timer, basic savings, unlimited breathing, 3 craving logs/day</div></div>
                         <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to clear-plus1.0 from $9.99/mo</button>
                       </div>
                     )}
@@ -834,7 +844,7 @@ export default function App() {
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Intensity {cravingIntensity}/10</label><input type="range" min={1} max={10} value={cravingIntensity} onChange={e => setCravingIntensity(parseInt(e.target.value))} className="w-full accent-white" /></div>
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Trigger</label><div className="grid grid-cols-3 gap-2">{['Stress', 'Coffee', 'After meal', 'Boredom', 'Social', 'Driving'].map(t => (<button key={t} onClick={() => setCravingTrigger(t)} className={`h-9 rounded-full text-[11px] font-medium border transition ${cravingTrigger === t ? 'bg-white text-black border-white' : 'bg-white/[0.05] border-white/[0.08] text-white/60'}`}>{t}</button>))}</div></div>
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Note (optional)</label><input value={cravingNote} onChange={e => setCravingNote(e.target.value)} placeholder="What helped?" className="w-full h-11 px-4 rounded-[12px] bg-white/[0.06] border border-white/[0.10] text-[13px] placeholder:text-white/30 focus:outline-none" /></div>
-              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> Log & Breathe</button>
+              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> Save craving</button>
             </div>
           </div>
         </div>
