@@ -557,7 +557,7 @@ export default function App() {
   // === RENDER ===
   return (
     <div
-      className="clear-shell min-h-screen bg-[#070708] text-white selection:bg-white/20 flex flex-col relative overflow-x-hidden"
+      className="clear-shell min-h-screen bg-[#070708] text-white selection:bg-white/20 flex flex-col relative"
       data-theme={appTheme}
       data-display-mode={displayMode}
       data-text-size={textSize}
