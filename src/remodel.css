@@ -23,6 +23,10 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 .baseline-summary>span{padding:9px 12px;border-radius:10px;background:var(--theme-soft);border:1px solid var(--theme-border);font-size:14px;font-weight:650}
 .baseline-summary button{margin-left:auto}
 .dashboard-return{background:var(--theme-accent);color:#fff;border:1px solid color-mix(in srgb,var(--theme-accent),#000 12%)}
+.app-header{background:color-mix(in srgb,var(--theme-surface) 92%,var(--theme-accent) 8%)}
+.app-accent-fill{background:var(--theme-accent);color:#fff;box-shadow:0 4px 18px color-mix(in srgb,var(--theme-accent),transparent 72%)}
+.app-accent-soft{background:color-mix(in srgb,var(--theme-accent),transparent 84%);border:1px solid color-mix(in srgb,var(--theme-accent),transparent 62%);color:var(--theme-accent)}
+.app-accent-dot{background:var(--theme-accent)}
 .achievement-card.is-earned{background:var(--theme-accent);color:#fff;border-color:var(--theme-accent);box-shadow:0 4px 14px color-mix(in srgb,var(--theme-accent),transparent 75%)}
 .tab-panel{animation:tab-panel-in .16s ease-out}
 @keyframes tab-panel-in{from{opacity:.72;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
