@@ -19,6 +19,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const plan = req.body?.billing;
+  const customerEmail = typeof req.body?.customerEmail === 'string' && req.body.customerEmail.includes('@')
+    ? req.body.customerEmail.slice(0, 254)
+    : undefined;
+  const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId)
+    ? req.body.userId
+    : undefined;
   if (!isKnownPlan(plan)) return res.status(400).json({ error: 'Invalid plan' });
   if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ error: 'Checkout temporarily unavailable' });
 
@@ -51,7 +57,9 @@ export default async function handler(req, res) {
       success_url: 'https://www.clear-plus.app/?session_id={CHECKOUT_SESSION_ID}',
       cancel_url: 'https://www.clear-plus.app/?canceled=true',
       allow_promotion_codes: true,
-      metadata: { billing_type: plan },
+      customer_email: customerEmail,
+      client_reference_id: userId,
+      metadata: { billing_type: plan, ...(userId ? { supabase_user_id: userId } : {}) },
     });
     return res.status(200).json({ url: session.url });
   } catch (err) {

@@ -1,5 +1,7 @@
 import Remodel from './Remodel';
 import EditableNumberInput from './EditableNumberInput';
+import { supabase } from './supabase';
+import type { User } from '@supabase/supabase-js';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { buildSavingsProjection } from '../lib/progress.js';
 import { Analytics } from "@vercel/analytics/react";
@@ -10,7 +12,7 @@ import {
   BarChart3, Gift, Plane, Milk, ShoppingBag, BookOpen, Phone, Info, Zap, TrendingUp,
   PiggyBank, Check, Star, Quote, Menu, LayoutDashboard, NotebookPen, Trophy, LifeBuoy, ArrowRight,
   MapPin, Upload, Share2, Instagram, Facebook, ExternalLink, QrCode, Copy, ChevronDown, Users, TimerReset,
-  BadgeCheck, Rocket, Eye, MousePointerClick
+  BadgeCheck, Rocket, Eye, MousePointerClick, Cloud, LogOut, Mail
 } from 'lucide-react';
 
 type Craving = { id: string; time: Date; intensity: number; trigger: string; passed: boolean; note?: string };
@@ -23,6 +25,7 @@ type AppTheme = 'green' | 'warm' | 'rose' | 'blue';
 type DisplayMode = 'light' | 'night';
 type TextSize = 'standard' | 'large';
 type AppFont = 'segoe' | 'arial' | 'verdana' | 'trebuchet' | 'georgia' | 'times' | 'comic' | 'courier' | 'calibri' | 'tahoma';
+type SyncStatus = 'local' | 'loading' | 'synced' | 'saving' | 'error';
 
 const THEME_OPTIONS: Array<{ id: AppTheme; label: string; swatch: string }> = [
   { id: 'green', label: 'Green', swatch: '#70b58a' },
@@ -161,6 +164,14 @@ export default function App() {
   // The fabricated "community saved" counter was removed deliberately. It was never
   // rendered, and no such aggregate exists. Do not reintroduce invented social proof.
   const [referral, setReferral] = useState<string>('');
+  const [user, setUser] = useState<User | null>(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
+  const [premiumSession, setPremiumSession] = useState(() => {
+    try { return localStorage.getItem('clear_premium_session') || ''; } catch { return ''; }
+  });
 
   // Share modal
   const [showShare, setShowShare] = useState(false);
@@ -188,6 +199,23 @@ export default function App() {
   } catch {}
   return [];
 });
+
+  const cloudState = useMemo(() => ({
+    version: 1,
+    quitDate: quitDate?.toISOString() || null,
+    cigsPerDay,
+    costPerPack,
+    packSize,
+    sosUses,
+    cravings: cravings.map(craving => ({ ...craving, time: craving.time.toISOString() })),
+    journals: journals.map(journal => ({ ...journal, date: journal.date.toISOString() })),
+    referral,
+    appTheme,
+    appFont,
+    displayMode,
+    textSize,
+    premiumSession: premiumSession || null,
+  }), [quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
 
   // === EFFECTS ===
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
@@ -222,6 +250,133 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('clear_journals', JSON.stringify(journals)); } catch {}
   }, [journals]);
+
+  useEffect(() => {
+    try {
+      if (premiumSession) localStorage.setItem('clear_premium_session', premiumSession);
+      else localStorage.removeItem('clear_premium_session');
+    } catch {}
+  }, [premiumSession]);
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (active) setUser(data.user);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) setUser(session?.user ?? null);
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setCloudReady(false);
+      setSyncStatus('local');
+      return;
+    }
+
+    let cancelled = false;
+    setCloudReady(false);
+    setSyncStatus('loading');
+
+    const loadCloudState = async () => {
+      const { data, error } = await supabase
+        .from('user_state')
+        .select('state')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        setSyncStatus('error');
+        return;
+      }
+
+      const remote = data?.state as Record<string, any> | undefined;
+      if (remote) {
+        // A device that already has genuine progress wins over a newly-created/default cloud row.
+        // This prevents someone signing in on a blank PC first from wiping the useful phone data
+        // when they later sign in there. A fresh device still receives every cloud preference.
+        const localHasProgress = Boolean(quitDate || cravings.length || journals.length || premiumSession);
+        if (!localHasProgress) {
+          const remoteQuitDate = remote.quitDate ? new Date(remote.quitDate) : null;
+          if (!remoteQuitDate || Number.isFinite(remoteQuitDate.getTime())) setQuitDate(remoteQuitDate);
+          if (Number.isFinite(remote.cigsPerDay)) setCigsPerDay(Math.max(1, remote.cigsPerDay));
+          if (Number.isFinite(remote.costPerPack)) setCostPerPack(Math.max(0, remote.costPerPack));
+          if (Number.isFinite(remote.packSize)) setPackSize(Math.max(1, remote.packSize));
+          if (Number.isFinite(remote.sosUses)) setSosUses(Math.max(0, remote.sosUses));
+          if (typeof remote.referral === 'string') setReferral(remote.referral);
+          if (THEME_OPTIONS.some(option => option.id === remote.appTheme)) setAppTheme(remote.appTheme);
+          if (FONT_OPTIONS.some(option => option.id === remote.appFont)) setAppFont(remote.appFont);
+          if (remote.displayMode === 'light' || remote.displayMode === 'night') setDisplayMode(remote.displayMode);
+          if (remote.textSize === 'standard' || remote.textSize === 'large') setTextSize(remote.textSize);
+        }
+
+        if (Array.isArray(remote.cravings)) {
+          const localById = new Map(cravings.map(item => [item.id, item]));
+          remote.cravings.forEach((item: any) => {
+            const time = new Date(item.time);
+            if (item?.id && Number.isFinite(time.getTime())) localById.set(item.id, { ...item, time });
+          });
+          setCravings([...localById.values()].sort((a, b) => b.time.getTime() - a.time.getTime()));
+        }
+        if (Array.isArray(remote.journals)) {
+          const localById = new Map(journals.map(item => [item.id, item]));
+          remote.journals.forEach((item: any) => {
+            const date = new Date(item.date);
+            if (item?.id && Number.isFinite(date.getTime())) localById.set(item.id, { ...item, date });
+          });
+          setJournals([...localById.values()].sort((a, b) => b.date.getTime() - a.date.getTime()));
+        }
+
+        if (!premiumSession && typeof remote.premiumSession === 'string' && remote.premiumSession) {
+          setPremiumSession(remote.premiumSession);
+          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(remote.premiumSession))
+            .then(response => response.json())
+            .then(result => {
+              setIsPremium(!!result.paid);
+              if (result.paid && result.billing) setBilling(result.billing);
+              if (!result.paid) setPremiumSession('');
+            })
+            .catch(() => {});
+        }
+      } else {
+        const { error: createError } = await supabase
+          .from('user_state')
+          .insert({ user_id: user.id, state: cloudState });
+        if (createError) {
+          setSyncStatus('error');
+          return;
+        }
+      }
+
+      if (!cancelled) {
+        setCloudReady(true);
+        setSyncStatus('synced');
+      }
+    };
+
+    loadCloudState();
+    return () => { cancelled = true; };
+    // The debounced save effect below handles subsequent state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user || !cloudReady) return;
+    setSyncStatus('saving');
+    const timer = window.setTimeout(async () => {
+      const { error } = await supabase
+        .from('user_state')
+        .upsert({ user_id: user.id, state: cloudState, updated_at: new Date().toISOString() });
+      setSyncStatus(error ? 'error' : 'synced');
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [user, cloudReady, cloudState]);
 
   useEffect(() => {
     const onHashChange = () => setActiveTabState(tabFromHash());
@@ -262,7 +417,7 @@ export default function App() {
         fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId)).then(r => r.json()).then(data => {
           if (data.paid) {
             setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true);
-            try { localStorage.setItem('clear_premium_session', sessionId); } catch {}
+            setPremiumSession(sessionId);
           } else {
             pushToast({ title: 'Payment not confirmed', body: 'Please check your payment receipt.' });
           }
@@ -273,15 +428,14 @@ export default function App() {
         // This is the fix. A hand-written `clear_isPremium` now accomplishes nothing — that key is
         // never read — and a cancelled or refunded subscription loses access here, instead of
         // keeping it forever.
-        let storedSession = null;
-        try { storedSession = localStorage.getItem('clear_premium_session'); } catch {}
+        const storedSession = premiumSession;
 
         if (storedSession) {
           fetch('/api/verify-checkout?session_id=' + encodeURIComponent(storedSession)).then(r => r.json()).then(data => {
             setIsPremium(!!data.paid);
             if (data.paid && data.billing) setBilling(data.billing);
             // Drop a credential Stripe no longer honours, so we stop re-checking a dead session.
-            if (!data.paid) { try { localStorage.removeItem('clear_premium_session'); } catch {} }
+            if (!data.paid) setPremiumSession('');
           }).catch(() => {
             // Offline, or the server is unreachable. Premium is deliberately left OFF rather than
             // trusting local state, because any local grant is forgeable. See the handover note.
@@ -329,6 +483,28 @@ export default function App() {
 
   const pushToast = (t: Omit<Toast, 'id'>) => { const id = Date.now().toString() + Math.random().toString(16).slice(2); setToasts(p => [...p.slice(-3), { ...t, id }]); setTimeout(() => setToasts(p => p.filter(x => x.id !== id)), 4000); };
   const openPaywall = (feature: string) => { setPaywallFeature(feature); setShowPaywall(true); };
+  const sendSignInLink = async () => {
+    const email = authEmail.trim();
+    if (!email) return;
+    setAuthBusy(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/#settings`, shouldCreateUser: true },
+    });
+    setAuthBusy(false);
+    if (error) {
+      pushToast({ title: 'Sign-in link failed', body: error.message });
+      return;
+    }
+    pushToast({ title: 'Check your email', body: 'Open the Clear+ sign-in link on this device.' });
+  };
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setCloudReady(false);
+    setSyncStatus('local');
+    pushToast({ title: 'Signed out', body: 'Your local progress is still on this device.' });
+  };
 
   // === CALCS ===
   const diffMs = quitDate ? Math.max(0, now.getTime() - quitDate.getTime()) : 0;
@@ -371,7 +547,7 @@ export default function App() {
     setCravings(next);
     setShowCravingForm(false);
     setCravingNote('');
-    pushToast({ title: 'Craving logged', body: 'Saved on this device.' });
+    pushToast({ title: 'Craving logged', body: user ? 'Saved and syncing to your account.' : 'Saved on this device.' });
   };
   const markCravingPassed = (id: string) => {
     const next = cravings.map(c => c.id === id ? { ...c, passed: true } : c);
@@ -417,7 +593,7 @@ export default function App() {
     try { localStorage.setItem('clear_journals', JSON.stringify(next)); } catch {}
     setJournals(next);
     setJournalText('');
-    pushToast({ title: 'Journal saved', body: 'Saved on this device.' });
+    pushToast({ title: 'Journal saved', body: user ? 'Saved and syncing to your account.' : 'Saved on this device.' });
     setActiveTab('dashboard');
   };
 
@@ -430,7 +606,7 @@ export default function App() {
     }
     try {
       pushToast({ title: 'Opening secure checkout', body: 'Review your plan in Stripe before paying.' });
-      const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billing: plan }) });
+      const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billing: plan, customerEmail: user?.email, userId: user?.id }) });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error('Checkout is unavailable. Please try again later.');
       window.location.assign(data.url);
@@ -899,11 +1075,35 @@ export default function App() {
                   </div>
                 </div>
                 <div className="lg:col-span-5 space-y-6">
+                  <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
+                    <div className="flex items-center gap-2 mb-4"><Cloud className="w-5 h-5 text-sky-300" /><h3 className="text-[14px] font-bold">Account & sync</h3></div>
+                    {user ? (
+                      <div className="space-y-4">
+                        <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4">
+                          <div className="text-[11px] uppercase tracking-widest text-white/35 font-bold">Signed in as</div>
+                          <div className="text-[13px] font-bold mt-1 break-all">{user.email}</div>
+                          <div className="text-[11px] text-white/45 mt-2">
+                            {syncStatus === 'synced' ? '✓ Progress synced' : syncStatus === 'saving' ? 'Syncing changes…' : syncStatus === 'loading' ? 'Loading your progress…' : syncStatus === 'error' ? 'Sync paused — check your connection' : 'Stored on this device'}
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices.</p>
+                        <button onClick={signOut} className="w-full h-11 rounded-[12px] bg-white/[0.05] border border-white/[0.10] text-[12px] font-bold flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> Sign out</button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-[12px] leading-[1.55] text-white/50">Sign in on your phone and computer to keep progress and premium access together. No extra password required.</p>
+                        <label className="text-[10px] uppercase tracking-widest font-bold text-white/35 block">Email address</label>
+                        <input type="email" autoComplete="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') sendSignInLink(); }} placeholder="you@example.com" className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" />
+                        <button disabled={authBusy || !authEmail.trim()} onClick={sendSignInLink} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 disabled:opacity-50"><Mail className="w-4 h-4" /> {authBusy ? 'Sending…' : 'Email me a sign-in link'}</button>
+                        <p className="text-[10px] text-white/35">Use the same email on every device. The link signs you in securely and expires automatically.</p>
+                      </div>
+                    )}
+                  </div>
                   <div className="rounded-[24px] bg-[#131315] border border-white/[0.08] p-6">
                     <div className="flex items-center gap-2 mb-4"><Crown className="w-5 h-5 text-amber-300" /><h3 className="text-[14px] font-bold">Subscription</h3></div>
                     {isPremium ? (
                       <div className="space-y-3">
-                        <p>Premium is enabled in this browser. To manage or cancel a paid subscription, use the subscription management link in your Stripe receipt.</p>
+                        <p>Premium is enabled{user ? ' and linked to your synced account' : ' in this browser'}. To manage or cancel a paid subscription, use the subscription management link in your Stripe receipt.</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -929,13 +1129,13 @@ export default function App() {
           </main>
 
           <footer className="relative z-10 border-t border-white/[0.06] mt-8 py-4 px-4 lg:px-7 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-white/25">
-            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in AUD • Quitline 13 7848 • Progress saved in this browser</div>
+            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in AUD • Quitline 13 7848 • {user ? 'Progress synced' : 'Progress saved in this browser'}</div>
             <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • ${moneySaved.toFixed(0)} saved</span></div>
           </footer>
         </>
       )}
 
-      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">Progress is stored in this browser. Clearing browser data removes saved progress.</p></section></div>}
+      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">{user ? 'Progress and verified premium access sync to your signed-in account.' : 'Progress is stored in this browser until you sign in from Settings.'}</p></section></div>}
 
       {/* Share Modal */}
       {showShare && (
