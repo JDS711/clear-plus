@@ -786,14 +786,14 @@ export default function App() {
       {mode === 'app' && (
         <>
           {/* App Header */}
-          <header className="relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] bg-[#0e0e10]/90 backdrop-blur-2xl sticky top-0">
+          <header className="app-header relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] backdrop-blur-2xl sticky top-0">
             <div className="flex items-center gap-4">
-              <button onClick={() => { setActiveTab('dashboard') }} className="w-9 h-9 rounded-[12px] bg-white text-black flex items-center justify-center font-bold shadow-[0_0_20px_rgba(255,255,255,0.15)]"><Wind className="w-5 h-5" /></button>
+              <button onClick={() => { setActiveTab('dashboard') }} className="app-accent-fill w-9 h-9 rounded-[12px] flex items-center justify-center font-bold"><Wind className="w-5 h-5" /></button>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">clear-plus1.0</span>
 
-                  {isPremium && <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/20 text-emerald-300"><Crown className="w-3 h-3" /> PLUS</span>}
+                  {isPremium && <span className="app-accent-soft hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"><Crown className="w-3 h-3" /> PLUS</span>}
                   <button onClick={() => { setActiveTab('dashboard') }} className="hidden sm:flex text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40 hover:text-white/70">Home</button>
                 </div>
                 <div className="text-[11px] text-white/40 mt-0.5 hidden sm:block tracking-wide">By a former smoker, for future non-smokers</div>
@@ -813,14 +813,14 @@ export default function App() {
 
             <div className="flex items-center gap-2">
               <div className="hidden sm:flex items-center gap-2 px-3 h-8 rounded-full bg-white/[0.06] border border-white/[0.08]">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
+                <div className="app-accent-dot w-2 h-2 rounded-full animate-pulse" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
               </div>
               {!isPremium ? (
-                <button onClick={() => openPaywall('clear-plus1.0 Premium')} className="h-9 px-4 rounded-full bg-gradient-to-br from-white to-white/80 text-black text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition shadow-[0_4px_20px_rgba(255,255,255,0.2)]">
+                <button onClick={() => openPaywall('clear-plus1.0 Premium')} className="app-accent-fill h-9 px-4 rounded-full text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition">
                   <Crown className="w-4 h-4" /> Upgrade
                 </button>
               ) : (
-                <div className="h-9 px-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-1.5 text-[11px] text-emerald-300"><Crown className="w-3.5 h-3.5" /> Premium</div>
+                <div className="app-accent-soft h-9 px-3 rounded-full flex items-center gap-1.5 text-[11px]"><Crown className="w-3.5 h-3.5" /> Premium</div>
               )}
               <button onClick={() => setMobileNavOpen(!mobileNavOpen)} className="lg:hidden w-9 h-9 rounded-full bg-white/[0.06] border border-white/[0.08] flex items-center justify-center"><Menu className="w-4 h-4" /></button>
             </div>
