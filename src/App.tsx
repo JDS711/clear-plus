@@ -377,7 +377,7 @@ export default function App() {
       // This effect only runs after local app state changes. On equal progress, the deliberate
       // edit made on this device must win; otherwise every theme, font or cost edit immediately
       // snaps back to the older cloud value.
-      const reconciled = reconcileCloudStates(cloudState, latest?.state || {}, { preferLocalOnTie: true });
+      const reconciled = reconcileCloudStates(cloudState, latest?.state || {}, { preferLocalSettings: true });
       if (JSON.stringify(reconciled) !== JSON.stringify(cloudState)) applyCloudState(reconciled);
       const { error } = await supabase
         .from('user_state')
