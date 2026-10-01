@@ -1,4 +1,5 @@
 import Remodel from './Remodel';
+import EditableNumberInput from './EditableNumberInput';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { buildSavingsProjection } from '../lib/progress.js';
 import { Analytics } from "@vercel/analytics/react";
@@ -18,21 +19,36 @@ type Toast = { id: string; title: string; body: string };
 type Tab = 'analytics' | 'dashboard' | 'sos' | 'journal' | 'rewards' | 'settings';
 type Mode = 'landing' | 'app';
 type ShareType = 'money' | 'days';
-type AppTheme = 'green' | 'warm' | 'rose' | 'blue' | 'night';
-type AppFont = 'clean' | 'friendly' | 'serif';
+type AppTheme = 'green' | 'warm' | 'rose' | 'blue';
+type DisplayMode = 'light' | 'night';
+type TextSize = 'standard' | 'large';
+type AppFont = 'segoe' | 'arial' | 'verdana' | 'trebuchet' | 'georgia' | 'times' | 'comic' | 'courier' | 'calibri' | 'tahoma';
 
 const THEME_OPTIONS: Array<{ id: AppTheme; label: string; swatch: string }> = [
-  { id: 'green', label: 'Pastel green', swatch: '#9fc9ad' },
-  { id: 'warm', label: 'Yellow orange', swatch: '#efc477' },
-  { id: 'rose', label: 'Pink red', swatch: '#e8a0a5' },
-  { id: 'blue', label: 'Blue grey', swatch: '#9eb7c8' },
-  { id: 'night', label: 'Night', swatch: '#22252b' },
+  { id: 'green', label: 'Green', swatch: '#70b58a' },
+  { id: 'warm', label: 'Yellow orange', swatch: '#e4ad4f' },
+  { id: 'rose', label: 'Pink red', swatch: '#dd7f8a' },
+  { id: 'blue', label: 'Blue grey', swatch: '#789fb8' },
 ];
 const FONT_OPTIONS: Array<{ id: AppFont; label: string; stack: string }> = [
-  { id: 'clean', label: 'Clean', stack: 'Inter, system-ui, sans-serif' },
-  { id: 'friendly', label: 'Friendly', stack: 'Trebuchet MS, Arial, sans-serif' },
-  { id: 'serif', label: 'Calm serif', stack: 'Georgia, Times New Roman, serif' },
+  { id: 'segoe', label: 'Segoe UI', stack: 'Segoe UI, Arial, sans-serif' },
+  { id: 'arial', label: 'Arial', stack: 'Arial, sans-serif' },
+  { id: 'verdana', label: 'Verdana', stack: 'Verdana, Arial, sans-serif' },
+  { id: 'trebuchet', label: 'Trebuchet MS', stack: 'Trebuchet MS, Arial, sans-serif' },
+  { id: 'georgia', label: 'Georgia', stack: 'Georgia, serif' },
+  { id: 'times', label: 'Times New Roman', stack: 'Times New Roman, serif' },
+  { id: 'comic', label: 'Comic Sans MS', stack: 'Comic Sans MS, cursive' },
+  { id: 'courier', label: 'Courier New', stack: 'Courier New, monospace' },
+  { id: 'calibri', label: 'Calibri', stack: 'Calibri, Arial, sans-serif' },
+  { id: 'tahoma', label: 'Tahoma', stack: 'Tahoma, Verdana, sans-serif' },
 ];
+const TAB_ORDER: Tab[] = ['dashboard', 'sos', 'journal', 'rewards', 'analytics', 'settings'];
+const tabFromHash = (): Tab => {
+  const hash = window.location.hash.slice(1);
+  if (hash === 'progress') return 'analytics';
+  return TAB_ORDER.includes(hash as Tab) ? hash as Tab : 'dashboard';
+};
+const hashForTab = (tab: Tab) => tab === 'analytics' ? 'progress' : tab;
 
 const QUOTES = [
   "Take a pause. Cravings pass, and support can help.",
@@ -73,7 +89,12 @@ export default function App() {
   // It is now derived from a server check on every load — see the session_id handling below.
   // It starts false and stays false until Stripe says otherwise.
   const [isPremium, setIsPremium] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [activeTab, setActiveTabState] = useState<Tab>(() => tabFromHash());
+  const setActiveTab = (tab: Tab) => {
+    setActiveTabState(tab);
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${hashForTab(tab)}`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState('Premium Analytics');
   const [billing, setBilling] = useState<'monthly' | 'yearly' | 'lifetime'>('yearly');
@@ -86,8 +107,16 @@ export default function App() {
   const [appFont, setAppFont] = useState<AppFont>(() => {
     try {
       const value = localStorage.getItem('clear_font') as AppFont | null;
-      return FONT_OPTIONS.some(option => option.id === value) ? value! : 'clean';
-    } catch { return 'clean'; }
+      return FONT_OPTIONS.some(option => option.id === value) ? value! : 'segoe';
+    } catch { return 'segoe'; }
+  });
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
+    try { return localStorage.getItem('clear_displayMode') === 'night' ? 'night' : 'light'; }
+    catch { return 'light'; }
+  });
+  const [textSize, setTextSize] = useState<TextSize>(() => {
+    try { return localStorage.getItem('clear_textSize') === 'large' ? 'large' : 'standard'; }
+    catch { return 'standard'; }
   });
 
   // Which plans Stripe will actually accept, reported by /api/plans when the paywall opens.
@@ -137,6 +166,7 @@ export default function App() {
   const [showShare, setShowShare] = useState(false);
   const [shareType, setShareType] = useState<ShareType>('money');
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const [cravings, setCravings] = useState<Craving[]>(() => {
   try {
@@ -179,9 +209,28 @@ export default function App() {
       localStorage.setItem('clear_mode', mode);
       localStorage.setItem('clear_theme', appTheme);
       localStorage.setItem('clear_font', appFont);
+      localStorage.setItem('clear_displayMode', displayMode);
+      localStorage.setItem('clear_textSize', textSize);
       if (referral) localStorage.setItem('clear_referral', referral);
     } catch {}
-  }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral, appTheme, appFont]);
+  }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral, appTheme, appFont, displayMode, textSize]);
+
+  useEffect(() => {
+    try { localStorage.setItem('clear_cravings', JSON.stringify(cravings)); } catch {}
+  }, [cravings]);
+
+  useEffect(() => {
+    try { localStorage.setItem('clear_journals', JSON.stringify(journals)); } catch {}
+  }, [journals]);
+
+  useEffect(() => {
+    const onHashChange = () => setActiveTabState(tabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    if (!window.location.hash) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#dashboard`);
+    }
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   useEffect(() => {
     try {
@@ -297,6 +346,17 @@ export default function App() {
   const lifeSavedHours = Math.floor((cigsAvoided * 11) / 60);
   const cravingsPassed = cravings.filter(c => c.passed).length;
   const progressPct = Math.min(100, Math.round((totalMins / 43200) * 100));
+  const achievements = [
+    { label: '24 hours', done: days >= 1, icon: '🔥' },
+    { label: '3 days', done: days >= 3, icon: '🌿' },
+    { label: '1 week', done: days >= 7, icon: '💪' },
+    { label: '$500 saved', done: moneySaved >= 500, icon: '💰' },
+    { label: '100 avoided', done: cigsAvoided >= 100, icon: '🚭' },
+    { label: '5 cravings beaten', done: cravingsPassed >= 5, icon: '🏆' },
+    { label: '$1,000 saved', done: moneySaved >= 1000, icon: '🎯' },
+    { label: '1 month', done: days >= 30, icon: '🌟' },
+  ];
+  const achievementsEarned = achievements.filter(achievement => achievement.done).length;
 
   const savingsChartData = useMemo(() => {
     const arr = buildSavingsProjection(days, hours, dailyCost);
@@ -306,13 +366,18 @@ export default function App() {
 
   const addCraving = () => {
     const c: Craving = { id: Date.now().toString(), time: new Date(), intensity: cravingIntensity, trigger: cravingTrigger, passed: false, note: cravingNote.trim() || undefined };
-    setCravings([c, ...cravings]);
+    const next = [c, ...cravings];
+    try { localStorage.setItem('clear_cravings', JSON.stringify(next)); } catch {}
+    setCravings(next);
     setShowCravingForm(false);
     setCravingNote('');
-    setActiveTab('sos');
-    pushToast({ title: 'Craving logged', body: 'Logging is always free. Start breathing if you want guided support.' });
+    pushToast({ title: 'Craving logged', body: 'Saved on this device.' });
   };
-  const markCravingPassed = (id: string) => setCravings(cravings.map(c => c.id === id ? { ...c, passed: true } : c));
+  const markCravingPassed = (id: string) => {
+    const next = cravings.map(c => c.id === id ? { ...c, passed: true } : c);
+    try { localStorage.setItem('clear_cravings', JSON.stringify(next)); } catch {}
+    setCravings(next);
+  };
   const resetBreathing = () => {
     setBreathRunning(false);
     setBreathSessionActive(false);
@@ -346,7 +411,15 @@ export default function App() {
       body: id ? `${cravingsPassed + 1} cravings defeated.` : 'You gave yourself space before acting.',
     });
   };
-  const addJournal = () => { if (!journalText.trim()) return; setJournals([{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals]); setJournalText(''); pushToast({ title: 'Journal saved', body: 'Your entry is stored locally. Keep going!' }); };
+  const addJournal = () => {
+    if (!journalText.trim()) return;
+    const next = [{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals];
+    try { localStorage.setItem('clear_journals', JSON.stringify(next)); } catch {}
+    setJournals(next);
+    setJournalText('');
+    pushToast({ title: 'Journal saved', body: 'Saved on this device.' });
+    setActiveTab('dashboard');
+  };
 
   const handleCheckout = async (plan: 'monthly' | 'yearly' | 'lifetime') => {
     // Refuse a plan the server has already told us Stripe will reject, so the customer gets a
@@ -446,6 +519,33 @@ export default function App() {
       document.getElementById('savings-calculator')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 50);
   };
+  const editAssumptions = () => {
+    setActiveTab('settings');
+    window.setTimeout(() => {
+      document.getElementById('cost-assumptions')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
+  const handleTouchStart = (event: React.TouchEvent) => {
+    const touch = event.touches[0];
+    const target = event.target as HTMLElement;
+    const interactive = target.closest('input, textarea, select, button, a, [role="slider"], [data-no-swipe]');
+    const edgeGesture = touch.clientX < 24 || touch.clientX > window.innerWidth - 24;
+    swipeStartRef.current = interactive || edgeGesture ? null : { x: touch.clientX, y: touch.clientY };
+  };
+  const handleTouchEnd = (event: React.TouchEvent) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start) return;
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    const currentIndex = TAB_ORDER.indexOf(activeTab);
+    const nextIndex = dx < 0
+      ? Math.min(TAB_ORDER.length - 1, currentIndex + 1)
+      : Math.max(0, currentIndex - 1);
+    if (nextIndex !== currentIndex) setActiveTab(TAB_ORDER[nextIndex]);
+  };
 
   const enterApp = (refSource?: string) => {
     if (refSource) setReferral(refSource);
@@ -459,7 +559,11 @@ export default function App() {
     <div
       className="clear-shell min-h-screen bg-[#070708] text-white selection:bg-white/20 flex flex-col relative overflow-x-hidden"
       data-theme={appTheme}
+      data-display-mode={displayMode}
+      data-text-size={textSize}
       style={{ '--app-font': FONT_OPTIONS.find(option => option.id === appFont)?.stack } as React.CSSProperties}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
     >
       {/* Celebration */}
       {showSuccessCelebration && (
@@ -536,8 +640,8 @@ export default function App() {
             </div>
           )}
 
-          <main className="relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
-            {activeTab === 'dashboard' && <Remodel quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onLog={() => setActiveTab('sos')} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
+          <main key={activeTab} className="tab-panel relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
+            {activeTab === 'dashboard' && <Remodel quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => setShowCravingForm(true)} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
             {activeTab === 'analytics' && (
                 <div className="lg:col-span-5 space-y-6">
                   {/* Premium Analytics */}
@@ -579,21 +683,13 @@ export default function App() {
                   </div>
 
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-5">
-                    <div className="flex items-center justify-between mb-4"><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Achievements</h2><span className="text-[11px] text-white/30">{cravingsPassed} wins</span></div>
-                    <div className="grid grid-cols-4 gap-3">
-                      {[
-                        { label: '24h', done: days >= 1, icon: '🔥', premium: false },
-                        { label: '3 days', done: days >= 3, icon: '🌿', premium: false },
-                        { label: '1 week', done: days >= 7, icon: '💪', premium: false },
-                        { label: '$500', done: moneySaved >= 500, icon: '💰', premium: true },
-                        { label: '100 cigs', done: cigsAvoided >= 100, icon: '🚭', premium: false },
-                        { label: 'Beast', done: cravingsPassed >= 5, icon: '🏆', premium: true },
-                        { label: 'Bali', done: yearlyCost >= 900, icon: '✈️', premium: true },
-                        { label: '1 month', done: days >= 30, icon: '🌟', premium: false },
-                      ].map(a => (
-                        <div key={a.label} className={`relative aspect-square rounded-[14px] border flex flex-col items-center justify-center gap-1 transition ${a.done ? 'bg-white text-black border-white shadow-[0_4px_20px_rgba(255,255,255,0.12)]' : 'bg-white/[0.04] border-white/[0.06] text-white/20'} ${a.premium && !isPremium ? 'opacity-60' : ''}`}>
-                          {a.premium && !isPremium && <Lock className="absolute top-1 right-1 w-3 h-3 text-white/30" />}
-                          <span className="text-[18px]">{a.icon}</span><span className="text-[10px] font-bold tracking-wide">{a.label}</span>
+                    <div className="flex items-center justify-between mb-4"><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Achievements</h2><span className="text-[11px] text-white/30">{achievementsEarned} of {achievements.length} earned</span></div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {achievements.map(achievement => (
+                        <div key={achievement.label} className={`achievement-card relative min-h-[92px] rounded-[14px] border flex flex-col items-center justify-center gap-1 text-center transition ${achievement.done ? 'is-earned' : 'bg-white/[0.04] border-white/[0.06] text-white/20'}`}>
+                          {achievement.done && <Check className="absolute top-2 right-2 w-3.5 h-3.5" />}
+                          <span className="text-[18px]">{achievement.icon}</span><span className="text-[10px] font-bold tracking-wide">{achievement.label}</span>
+                          <span className="text-[9px] uppercase tracking-wider">{achievement.done ? 'Earned' : 'In progress'}</span>
                         </div>
                       ))}
                     </div>
@@ -642,6 +738,7 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+                    <button onClick={() => setActiveTab('dashboard')} className="dashboard-return mt-5 w-full min-h-12 rounded-[14px] font-bold text-[14px] flex items-center justify-center gap-2"><LayoutDashboard className="w-4 h-4" /> Back to Dashboard</button>
                   </div>
                 </div>
               </div>
@@ -675,6 +772,7 @@ export default function App() {
                       <div className="flex gap-2"><Heart className="w-4 h-4 text-rose-300 shrink-0 mt-0.5" /> Look back for patterns and ideas you want to try again.</div>
                     </div>
                   </div>
+                  <button onClick={() => setActiveTab('dashboard')} className="dashboard-return w-full min-h-12 rounded-[14px] font-bold text-[14px] flex items-center justify-center gap-2"><LayoutDashboard className="w-4 h-4" /> Back to Dashboard</button>
                 </div>
               </div>
             )}
@@ -737,7 +835,7 @@ export default function App() {
                         />
                       </div>
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
-                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Colour theme</div>
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Accent colour</div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           {THEME_OPTIONS.map(option => (
                             <button
@@ -754,8 +852,24 @@ export default function App() {
                         </div>
                       </div>
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Display mode</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(['light', 'night'] as const).map(option => (
+                            <button key={option} type="button" aria-pressed={displayMode === option} onClick={() => setDisplayMode(option)} className={`min-h-11 rounded-[12px] border px-3 py-2 text-[13px] font-bold capitalize ${displayMode === option ? 'border-current bg-white/[0.10]' : 'border-white/[0.08] bg-white/[0.03]'}`}>{option}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Text size</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(['standard', 'large'] as const).map(option => (
+                            <button key={option} type="button" aria-pressed={textSize === option} onClick={() => setTextSize(option)} className={`min-h-11 rounded-[12px] border px-3 py-2 text-[13px] font-bold capitalize ${textSize === option ? 'border-current bg-white/[0.10]' : 'border-white/[0.08] bg-white/[0.03]'}`}>{option}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Font</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                           {FONT_OPTIONS.map(option => (
                             <button
                               key={option.id}
@@ -770,13 +884,15 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                      <div id="cost-assumptions" className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigs / day</label><input type="number" value={cigsPerDay} onChange={e => setCigsPerDay(Math.max(1, parseInt(e.target.value) || 1))} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack AUD</label><input type="number" value={costPerPack} onChange={e => setCostPerPack(Math.max(0, parseFloat(e.target.value) || 0))} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / day</label><EditableNumberInput aria-label="Cigarettes per day" min={1} max={200} value={cigsPerDay} onValueChange={setCigsPerDay} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / pack</label><EditableNumberInput aria-label="Cigarettes per pack" min={1} max={200} value={packSize} onValueChange={setPackSize} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack AUD</label><EditableNumberInput aria-label="Price per pack AUD" min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
                         </div>
-                        <div className="mt-3 flex gap-1.5">{[20, 25, 30].map(s => (<button key={s} onClick={() => setPackSize(s)} className={`flex-1 h-10 rounded-[12px] text-[12px] font-bold border ${packSize === s ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{s} / pack</button>))}</div>
+                        <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
+                        <p className="text-[11px] text-white/40 mt-2">Choose a common pack size or type an exact custom amount above.</p>
                       </div>
 
                     </div>
@@ -814,7 +930,7 @@ export default function App() {
 
           <footer className="relative z-10 border-t border-white/[0.06] mt-8 py-4 px-4 lg:px-7 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-white/25">
             <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in AUD • Quitline 13 7848 • Progress saved in this browser</div>
-            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • ${moneySaved.toFixed(0)} saved</span><button onClick={() => setActiveTab('dashboard')} className="px-2 py-1 rounded-full bg-white/[0.06] border border-white/[0.08]">Home</button></div>
+            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • ${moneySaved.toFixed(0)} saved</span></div>
           </footer>
         </>
       )}
