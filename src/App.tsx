@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 import type { User } from '@supabase/supabase-js';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { buildSavingsProjection } from '../lib/progress.js';
+import { reconcileCloudStates } from '../lib/cloud-sync.js';
 import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -169,6 +170,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
+  const [syncRequest, setSyncRequest] = useState(0);
   const [premiumSession, setPremiumSession] = useState(() => {
     try { return localStorage.getItem('clear_premium_session') || ''; } catch { return ''; }
   });
@@ -201,7 +203,7 @@ export default function App() {
 });
 
   const cloudState = useMemo(() => ({
-    version: 1,
+    version: 2,
     quitDate: quitDate?.toISOString() || null,
     cigsPerDay,
     costPerPack,
@@ -216,6 +218,34 @@ export default function App() {
     textSize,
     premiumSession: premiumSession || null,
   }), [quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
+
+  const applyCloudState = (state: Record<string, any>) => {
+    const syncedQuitDate = state.quitDate ? new Date(state.quitDate) : null;
+    if (!syncedQuitDate || Number.isFinite(syncedQuitDate.getTime())) setQuitDate(syncedQuitDate);
+    if (Number.isFinite(state.cigsPerDay)) setCigsPerDay(Math.max(1, state.cigsPerDay));
+    if (Number.isFinite(state.costPerPack)) setCostPerPack(Math.max(0, state.costPerPack));
+    if (Number.isFinite(state.packSize)) setPackSize(Math.max(1, state.packSize));
+    if (Number.isFinite(state.sosUses)) setSosUses(Math.max(0, state.sosUses));
+    if (typeof state.referral === 'string') setReferral(state.referral);
+    if (THEME_OPTIONS.some(option => option.id === state.appTheme)) setAppTheme(state.appTheme);
+    if (FONT_OPTIONS.some(option => option.id === state.appFont)) setAppFont(state.appFont);
+    if (state.displayMode === 'light' || state.displayMode === 'night') setDisplayMode(state.displayMode);
+    if (state.textSize === 'standard' || state.textSize === 'large') setTextSize(state.textSize);
+
+    if (Array.isArray(state.cravings)) {
+      setCravings(state.cravings.flatMap((item: any) => {
+        const time = new Date(item.time);
+        return item?.id && Number.isFinite(time.getTime()) ? [{ ...item, time }] : [];
+      }));
+    }
+    if (Array.isArray(state.journals)) {
+      setJournals(state.journals.flatMap((item: any) => {
+        const date = new Date(item.date);
+        return item?.id && Number.isFinite(date.getTime()) ? [{ ...item, date }] : [];
+      }));
+    }
+    if (typeof state.premiumSession === 'string' && state.premiumSession) setPremiumSession(state.premiumSession);
+  };
 
   // === EFFECTS ===
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
@@ -297,45 +327,19 @@ export default function App() {
       }
 
       const remote = data?.state as Record<string, any> | undefined;
-      if (remote) {
-        // A device that already has genuine progress wins over a newly-created/default cloud row.
-        // This prevents someone signing in on a blank PC first from wiping the useful phone data
-        // when they later sign in there. A fresh device still receives every cloud preference.
-        const localHasProgress = Boolean(quitDate || cravings.length || journals.length || premiumSession);
-        if (!localHasProgress) {
-          const remoteQuitDate = remote.quitDate ? new Date(remote.quitDate) : null;
-          if (!remoteQuitDate || Number.isFinite(remoteQuitDate.getTime())) setQuitDate(remoteQuitDate);
-          if (Number.isFinite(remote.cigsPerDay)) setCigsPerDay(Math.max(1, remote.cigsPerDay));
-          if (Number.isFinite(remote.costPerPack)) setCostPerPack(Math.max(0, remote.costPerPack));
-          if (Number.isFinite(remote.packSize)) setPackSize(Math.max(1, remote.packSize));
-          if (Number.isFinite(remote.sosUses)) setSosUses(Math.max(0, remote.sosUses));
-          if (typeof remote.referral === 'string') setReferral(remote.referral);
-          if (THEME_OPTIONS.some(option => option.id === remote.appTheme)) setAppTheme(remote.appTheme);
-          if (FONT_OPTIONS.some(option => option.id === remote.appFont)) setAppFont(remote.appFont);
-          if (remote.displayMode === 'light' || remote.displayMode === 'night') setDisplayMode(remote.displayMode);
-          if (remote.textSize === 'standard' || remote.textSize === 'large') setTextSize(remote.textSize);
-        }
+      const reconciled = reconcileCloudStates(cloudState, remote || {});
+      applyCloudState(reconciled);
 
-        if (Array.isArray(remote.cravings)) {
-          const localById = new Map(cravings.map(item => [item.id, item]));
-          remote.cravings.forEach((item: any) => {
-            const time = new Date(item.time);
-            if (item?.id && Number.isFinite(time.getTime())) localById.set(item.id, { ...item, time });
-          });
-          setCravings([...localById.values()].sort((a, b) => b.time.getTime() - a.time.getTime()));
-        }
-        if (Array.isArray(remote.journals)) {
-          const localById = new Map(journals.map(item => [item.id, item]));
-          remote.journals.forEach((item: any) => {
-            const date = new Date(item.date);
-            if (item?.id && Number.isFinite(date.getTime())) localById.set(item.id, { ...item, date });
-          });
-          setJournals([...localById.values()].sort((a, b) => b.date.getTime() - a.date.getTime()));
-        }
+      const { error: saveError } = await supabase
+        .from('user_state')
+        .upsert({ user_id: user.id, state: reconciled, updated_at: new Date().toISOString() });
+      if (saveError) {
+        setSyncStatus('error');
+        return;
+      }
 
-        if (!premiumSession && typeof remote.premiumSession === 'string' && remote.premiumSession) {
-          setPremiumSession(remote.premiumSession);
-          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(remote.premiumSession))
+      if (reconciled.premiumSession) {
+          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(reconciled.premiumSession))
             .then(response => response.json())
             .then(result => {
               setIsPremium(!!result.paid);
@@ -343,15 +347,6 @@ export default function App() {
               if (!result.paid) setPremiumSession('');
             })
             .catch(() => {});
-        }
-      } else {
-        const { error: createError } = await supabase
-          .from('user_state')
-          .insert({ user_id: user.id, state: cloudState });
-        if (createError) {
-          setSyncStatus('error');
-          return;
-        }
       }
 
       if (!cancelled) {
@@ -364,19 +359,41 @@ export default function App() {
     return () => { cancelled = true; };
     // The debounced save effect below handles subsequent state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, syncRequest]);
 
   useEffect(() => {
     if (!user || !cloudReady) return;
     setSyncStatus('saving');
     const timer = window.setTimeout(async () => {
+      const { data: latest, error: readError } = await supabase
+        .from('user_state')
+        .select('state')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (readError) {
+        setSyncStatus('error');
+        return;
+      }
+      const reconciled = reconcileCloudStates(cloudState, latest?.state || {});
+      if (JSON.stringify(reconciled) !== JSON.stringify(cloudState)) applyCloudState(reconciled);
       const { error } = await supabase
         .from('user_state')
-        .upsert({ user_id: user.id, state: cloudState, updated_at: new Date().toISOString() });
+        .upsert({ user_id: user.id, state: reconciled, updated_at: new Date().toISOString() });
       setSyncStatus(error ? 'error' : 'synced');
     }, 650);
     return () => window.clearTimeout(timer);
   }, [user, cloudReady, cloudState]);
+
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => setSyncRequest(request => request + 1);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [user]);
 
   useEffect(() => {
     const onHashChange = () => setActiveTabState(tabFromHash());
@@ -1087,6 +1104,7 @@ export default function App() {
                           </div>
                         </div>
                         <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices.</p>
+                        <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Cloud className="w-4 h-4" /> Sync both devices now</button>
                         <button onClick={signOut} className="w-full h-11 rounded-[12px] bg-white/[0.05] border border-white/[0.10] text-[12px] font-bold flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> Sign out</button>
                       </div>
                     ) : (
