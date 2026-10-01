@@ -4,7 +4,7 @@ body{background:#f3f7f2!important;color:#244331}.clear-shell{--theme-canvas:#f3f
 @media(max-width:720px){.new-grid,.new-fields,.new-timeline{grid-template-columns:1fr}.new-card{padding:24px}.wide{grid-column:auto}.remodel .intro{display:block}.remodel .intro button{margin-top:12px}.new-story blockquote{font-size:22px}.new-results{gap:22px}.new-stats strong{font-size:24px}}
 
 /* Appearance, navigation and achievement refinements. */
-.clear-shell{overscroll-behavior-y:contain;touch-action:pan-y}
+.clear-shell{overflow-x:clip}
 .clear-shell[data-theme="green"]{--theme-canvas:#eef7f0;--theme-surface:#fbfefc;--theme-soft:#d6ebdc;--theme-text:#203f2b;--theme-muted:#577361;--theme-border:#c9dfcf;--theme-accent:#3f8159;--theme-highlight:#9bd4aa}
 .clear-shell[data-theme="warm"]{--theme-canvas:#fff5df;--theme-surface:#fffdf7;--theme-soft:#f6dfaa;--theme-text:#513817;--theme-muted:#7c6746;--theme-border:#e8d19f;--theme-accent:#9b6622;--theme-highlight:#f0bd61}
 .clear-shell[data-theme="rose"]{--theme-canvas:#fff0f2;--theme-surface:#fffafb;--theme-soft:#f3ced3;--theme-text:#542b31;--theme-muted:#805d63;--theme-border:#e7c2c7;--theme-accent:#9e4a56;--theme-highlight:#e99aa3}
