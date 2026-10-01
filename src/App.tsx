@@ -40,6 +40,12 @@ const SYSTEM_THEME_COLORS: Record<AppTheme, Record<DisplayMode, string>> = {
   rose: { light: '#9e4a56', night: '#a95460' },
   blue: { light: '#486f86', night: '#557f97' },
 };
+const SYSTEM_CANVAS_COLORS: Record<AppTheme, string> = {
+  green: '#eef7f0',
+  warm: '#fff5df',
+  rose: '#fff0f2',
+  blue: '#edf4f7',
+};
 const FONT_OPTIONS: Array<{ id: AppFont; label: string; stack: string }> = [
   { id: 'segoe', label: 'Segoe UI', stack: 'Segoe UI, Arial, sans-serif' },
   { id: 'arial', label: 'Arial', stack: 'Arial, sans-serif' },
@@ -281,9 +287,11 @@ export default function App() {
 
   useEffect(() => {
     const colour = SYSTEM_THEME_COLORS[appTheme][displayMode];
+    const canvas = displayMode === 'night' ? '#181a1e' : SYSTEM_CANVAS_COLORS[appTheme];
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', colour);
     document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', displayMode === 'night' ? 'black-translucent' : 'default');
-    document.documentElement.style.backgroundColor = displayMode === 'night' ? '#181a1e' : colour;
+    document.documentElement.style.setProperty('background-color', canvas, 'important');
+    document.body.style.setProperty('background-color', canvas, 'important');
   }, [appTheme, displayMode]);
 
   useEffect(() => {
@@ -865,7 +873,7 @@ export default function App() {
                           <div className="flex items-center justify-between mb-3"><span className="text-[11px] font-bold tracking-widest uppercase text-white/30">Cumulative Savings</span><span className="text-[11px] text-emerald-300 font-bold">${moneySaved.toFixed(0)} total</span></div>
                           <div className="h-[110px] w-full relative">
                             <svg viewBox="0 0 300 100" className="w-full h-full">
-                              <defs><linearGradient id="g2" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity="0.4" /><stop offset="100%" stopColor="#10b981" stopOpacity="0" /></linearGradient></defs>
+                              <defs><linearGradient id="g2" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--theme-accent)" stopOpacity="0.4" /><stop offset="100%" stopColor="var(--theme-accent)" stopOpacity="0" /></linearGradient></defs>
                               {(() => {
                                 const pts = savingsChartData.points;
                                 const max = savingsChartData.max || 1;
@@ -990,7 +998,7 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-7 space-y-6">
                   <div className="rounded-[28px] bg-[#131315] border border-white/[0.08] overflow-hidden relative">
-                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/[0.08] to-amber-500/[0.06]" />
+                    <div className="rewards-accent-wash absolute inset-0" />
                     <div className="relative p-6 lg:p-7">
                       <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-[10px] bg-amber-500/15 border border-amber-500/20 flex items-center justify-center"><PiggyBank className="w-4 h-4 text-amber-300" /></div><div><h2 className="text-[14px] font-bold">Pledge Jar • Your Savings, Visualized</h2><div className="text-[11px] text-white/40">Fill it with what you don't smoke.</div></div></div>
@@ -1000,7 +1008,7 @@ export default function App() {
                         <div className="flex justify-center">
                           <div className="relative w-[160px] h-[220px] rounded-b-[28px] rounded-t-[12px] border-[3px] border-white/[0.12] bg-white/[0.03] overflow-hidden">
                             <div className="absolute top-0 left-0 right-0 h-[18px] bg-white/[0.08] border-b border-white/[0.10] flex items-center justify-center"><div className="w-10 h-1.5 rounded-full bg-white/20" /></div>
-                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-emerald-400 to-emerald-300/80 transition-all duration-1000 flex items-end justify-center pb-2" style={{ height: `${Math.min(95, (moneySaved / (yearlyCost || 1)) * 100)}%` }}>
+                            <div className="pledge-fill absolute bottom-0 left-0 right-0 transition-all duration-1000 flex items-end justify-center pb-2" style={{ height: `${Math.min(95, (moneySaved / (yearlyCost || 1)) * 100)}%` }}>
                               <span className="relative text-[10px] font-bold text-black/70">${moneySaved.toFixed(0)}</span>
                             </div>
                           </div>
