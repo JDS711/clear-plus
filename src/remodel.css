@@ -27,6 +27,8 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 .app-accent-fill{background:var(--theme-accent);color:#fff;box-shadow:0 4px 18px color-mix(in srgb,var(--theme-accent),transparent 72%)}
 .app-accent-soft{background:color-mix(in srgb,var(--theme-accent),transparent 84%);border:1px solid color-mix(in srgb,var(--theme-accent),transparent 62%);color:var(--theme-accent)}
 .app-accent-dot{background:var(--theme-accent)}
+.breath-orb{background:linear-gradient(135deg,var(--theme-highlight),var(--theme-accent));box-shadow:0 0 60px color-mix(in srgb,var(--theme-accent),transparent 48%)}
+.sos-accent-wash{background:radial-gradient(circle at 25% 20%,color-mix(in srgb,var(--theme-accent),transparent 78%),transparent 48%),radial-gradient(circle at 80% 75%,color-mix(in srgb,var(--theme-highlight),transparent 86%),transparent 42%)}
 .achievement-card.is-earned{background:var(--theme-accent);color:#fff;border-color:var(--theme-accent);box-shadow:0 4px 14px color-mix(in srgb,var(--theme-accent),transparent 75%)}
 .tab-panel{animation:tab-panel-in .16s ease-out}
 @keyframes tab-panel-in{from{opacity:.72;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
