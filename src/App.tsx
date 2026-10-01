@@ -1,11 +1,12 @@
 import Remodel from './Remodel';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
+import { buildSavingsProjection } from '../lib/progress.js';
 import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Wind, Heart, Clock, DollarSign, Cigarette, X, Plus, Sparkles, Flame, Activity, Brain, Settings,
   Play, Pause, RotateCcw, ShieldCheck, Leaf, Droplets, Download, Smartphone, Wallet, Crown, Lock,
-  BarChart3, CalendarDays, Gift, Plane, Milk, ShoppingBag, BookOpen, Phone, Info, Zap, TrendingUp,
+  BarChart3, Gift, Plane, Milk, ShoppingBag, BookOpen, Phone, Info, Zap, TrendingUp,
   PiggyBank, Check, Star, Quote, Menu, LayoutDashboard, NotebookPen, Trophy, LifeBuoy, ArrowRight,
   MapPin, Upload, Share2, Instagram, Facebook, ExternalLink, QrCode, Copy, ChevronDown, Users, TimerReset,
   BadgeCheck, Rocket, Eye, MousePointerClick
@@ -17,6 +18,21 @@ type Toast = { id: string; title: string; body: string };
 type Tab = 'analytics' | 'dashboard' | 'sos' | 'journal' | 'rewards' | 'settings';
 type Mode = 'landing' | 'app';
 type ShareType = 'money' | 'days';
+type AppTheme = 'green' | 'warm' | 'rose' | 'blue' | 'night';
+type AppFont = 'clean' | 'friendly' | 'serif';
+
+const THEME_OPTIONS: Array<{ id: AppTheme; label: string; swatch: string }> = [
+  { id: 'green', label: 'Pastel green', swatch: '#9fc9ad' },
+  { id: 'warm', label: 'Yellow orange', swatch: '#efc477' },
+  { id: 'rose', label: 'Pink red', swatch: '#e8a0a5' },
+  { id: 'blue', label: 'Blue grey', swatch: '#9eb7c8' },
+  { id: 'night', label: 'Night', swatch: '#22252b' },
+];
+const FONT_OPTIONS: Array<{ id: AppFont; label: string; stack: string }> = [
+  { id: 'clean', label: 'Clean', stack: 'Inter, system-ui, sans-serif' },
+  { id: 'friendly', label: 'Friendly', stack: 'Trebuchet MS, Arial, sans-serif' },
+  { id: 'serif', label: 'Calm serif', stack: 'Georgia, Times New Roman, serif' },
+];
 
 const QUOTES = [
   "Take a pause. Cravings pass, and support can help.",
@@ -61,6 +77,18 @@ export default function App() {
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState('Premium Analytics');
   const [billing, setBilling] = useState<'monthly' | 'yearly' | 'lifetime'>('yearly');
+  const [appTheme, setAppTheme] = useState<AppTheme>(() => {
+    try {
+      const value = localStorage.getItem('clear_theme') as AppTheme | null;
+      return THEME_OPTIONS.some(option => option.id === value) ? value! : 'green';
+    } catch { return 'green'; }
+  });
+  const [appFont, setAppFont] = useState<AppFont>(() => {
+    try {
+      const value = localStorage.getItem('clear_font') as AppFont | null;
+      return FONT_OPTIONS.some(option => option.id === value) ? value! : 'clean';
+    } catch { return 'clean'; }
+  });
 
   // Which plans Stripe will actually accept, reported by /api/plans when the paywall opens.
   // null means "not asked yet, or no usable answer".
@@ -149,9 +177,11 @@ export default function App() {
       // in the browser; mirroring it here is what made the flag worth forging.
       localStorage.setItem('clear_sosUses', JSON.stringify({ date: new Date().toDateString(), count: sosUses }));
       localStorage.setItem('clear_mode', mode);
+      localStorage.setItem('clear_theme', appTheme);
+      localStorage.setItem('clear_font', appFont);
       if (referral) localStorage.setItem('clear_referral', referral);
     } catch {}
-  }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral]);
+  }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral, appTheme, appFont]);
 
   useEffect(() => {
     try {
@@ -269,26 +299,10 @@ export default function App() {
   const progressPct = Math.min(100, Math.round((totalMins / 43200) * 100));
 
   const savingsChartData = useMemo(() => {
-    const pts = 30;
-    const arr = [];
-    const start = Math.max(0, days - pts + 1);
-    for (let i = 0; i < pts; i++) {
-      const d = start + i;
-      const saved = (d <= days ? d * dailyCost : 0) + (d === days ? (hours / 24) * dailyCost : 0);
-      arr.push({ day: d, saved: Math.max(0, saved) });
-    }
+    const arr = buildSavingsProjection(days, hours, dailyCost);
     const max = Math.max(...arr.map(a => a.saved), yearlyCost / 12);
-    return { points: arr, max: max * 1.1 };
+    return { points: arr, max: max * 1.1, todayIndex: arr.findIndex(point => point.kind === 'today') };
   }, [days, hours, dailyCost, yearlyCost]);
-
-  const heatmap = useMemo(() => {
-    const daysArr = Array.from({ length: 35 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (34 - i)); d.setHours(12, 0, 0, 0); return d; });
-    return daysArr.map(d => {
-      const same = cravings.filter(c => new Date(c.time).toDateString() === d.toDateString());
-      const avg = same.length ? Math.round(same.reduce((a, b) => a + b.intensity, 0) / same.length) : 0;
-      return { date: d, count: same.length, avg };
-    });
-  }, [cravings]);
 
   const addCraving = () => {
     const c: Craving = { id: Date.now().toString(), time: new Date(), intensity: cravingIntensity, trigger: cravingTrigger, passed: false, note: cravingNote.trim() || undefined };
@@ -426,6 +440,12 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     setMobileNavOpen(false);
   };
+  const reviewSavingsEstimate = () => {
+    setActiveTab('dashboard');
+    window.setTimeout(() => {
+      document.getElementById('savings-calculator')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  };
 
   const enterApp = (refSource?: string) => {
     if (refSource) setReferral(refSource);
@@ -436,7 +456,11 @@ export default function App() {
 
   // === RENDER ===
   return (
-    <div className="clear-shell min-h-screen bg-[#070708] text-white selection:bg-white/20 flex flex-col relative overflow-x-hidden">
+    <div
+      className="clear-shell min-h-screen bg-[#070708] text-white selection:bg-white/20 flex flex-col relative overflow-x-hidden"
+      data-theme={appTheme}
+      style={{ '--app-font': FONT_OPTIONS.find(option => option.id === appFont)?.stack } as React.CSSProperties}
+    >
       {/* Celebration */}
       {showSuccessCelebration && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none">
@@ -534,22 +558,20 @@ export default function App() {
                                 const max = savingsChartData.max || 1;
                                 const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${(i / (pts.length - 1)) * 280 + 10} ${90 - (p.saved / max) * 80}`).join(' ');
                                 const area = path + ` L ${(pts.length - 1) / (pts.length - 1) * 280 + 10} 90 L 10 90 Z`;
-                                return <><path d={area} fill="url(#g2)" /><path d={path} fill="none" stroke="#10b981" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" /></>;
+                                const todayX = (savingsChartData.todayIndex / (pts.length - 1)) * 280 + 10;
+                                return <><path d={area} fill="url(#g2)" /><path d={path} fill="none" stroke="var(--theme-accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" /><line x1={todayX} x2={todayX} y1="8" y2="92" stroke="var(--theme-accent)" strokeOpacity="0.35" strokeDasharray="3 3" /></>;
                               })()}
                             </svg>
-                            <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[9px] text-white/20 px-2"><span>Day {Math.max(0, days - 29)}</span><span>Today</span><span>Proj +15d</span></div>
+                            <div className="absolute bottom-0 left-0 right-0 flex justify-between text-[9px] text-white/20 px-2"><span>Past 14d</span><span>Today</span><span>Projected +15d</span></div>
                           </div>
-                        </div>
-                        <div className="rounded-[16px] bg-[#0f0f10] border border-white/[0.06] p-4">
-                          <div className="flex items-center justify-between mb-3"><span className="text-[11px] font-bold tracking-widest uppercase text-white/30 flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5" /> Craving Heatmap</span><span className="text-[10px] text-white/30">{cravingsPassed} wins</span></div>
-                          <div className="grid grid-cols-7 gap-1.5">{heatmap.map((d, i) => { const intensity = d.avg; const bg = intensity === 0 ? 'bg-white/[0.04]' : intensity <= 3 ? 'bg-emerald-500/20' : intensity <= 6 ? 'bg-amber-500/30' : 'bg-rose-500/40'; return <div key={i} className={`aspect-square rounded-[6px] border border-white/[0.04] flex items-center justify-center ${bg}`}><span className={`text-[9px] font-bold ${d.avg > 0 ? 'text-white/80' : 'text-white/15'}`}>{d.count || ''}</span></div>; })}</div>
+                          <p className="text-[11px] text-white/40 mt-2">Solid progress through today; the right side estimates future savings if you remain smoke-free.</p>
                         </div>
                       </div>
                       {!isPremium && (
                         <div className="absolute inset-0 bg-gradient-to-t from-[#121214] via-[#121214]/80 to-transparent flex flex-col items-center justify-end p-6 text-center">
                           <div className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center mb-3 shadow-[0_8px_24px_rgba(255,255,255,0.2)]"><Crown className="w-6 h-6" /></div>
                           <div className="text-[15px] font-bold tracking-[-0.01em]">Unlock Premium Analytics</div>
-                          <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings chart, heatmap, 1-year projections. In 1 year: ${yearlyCost.toFixed(0)} saved.</div>
+                          <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: ${yearlyCost.toFixed(0)} saved.</div>
                           <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with clear-plus1.0</button>
                         </div>
                       )}
@@ -681,7 +703,7 @@ export default function App() {
                             <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Estimated spending avoided</div><div className="text-[20px] font-[900] mt-1">${moneySaved.toFixed(2)}</div></div>
                             <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Yearly goal</div><div className="text-[20px] font-[900] mt-1">${yearlyCost.toFixed(0)}</div><div className="text-[11px] text-emerald-300">{Math.round((moneySaved / yearlyCost) * 100) || 0}% filled</div></div>
                           </div>
-                          <button onClick={() => setActiveTab('dashboard')} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-white/90"><Gift className="w-4 h-4" /> Review savings estimate</button>
+                          <button onClick={reviewSavingsEstimate} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-white/90"><Gift className="w-4 h-4" /> Review savings estimate</button>
                         </div>
                       </div>
                     </div>
@@ -713,6 +735,40 @@ export default function App() {
                           }}
                           className="w-full min-w-0 h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px] [color-scheme:dark]"
                         />
+                      </div>
+                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Colour theme</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {THEME_OPTIONS.map(option => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              aria-pressed={appTheme === option.id}
+                              onClick={() => setAppTheme(option.id)}
+                              className={`min-h-11 rounded-[12px] border px-3 py-2 text-[12px] font-bold flex items-center gap-2 ${appTheme === option.id ? 'border-current bg-white/[0.10]' : 'border-white/[0.08] bg-white/[0.03]'}`}
+                            >
+                              <span className="w-4 h-4 rounded-full border border-black/10" style={{ background: option.swatch }} />
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Font</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {FONT_OPTIONS.map(option => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              aria-pressed={appFont === option.id}
+                              onClick={() => setAppFont(option.id)}
+                              className={`min-h-11 rounded-[12px] border px-3 py-2 text-[13px] ${appFont === option.id ? 'border-current bg-white/[0.10]' : 'border-white/[0.08] bg-white/[0.03]'}`}
+                              style={{ fontFamily: option.stack }}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
@@ -880,7 +936,7 @@ export default function App() {
       )}
 
        <Analytics />
-       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'); *{font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial}`}</style>
+       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'); .clear-shell, .clear-shell *{font-family:var(--app-font, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial)}`}</style>
     </div>
   );
 }
