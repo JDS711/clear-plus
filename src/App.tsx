@@ -1,9 +1,10 @@
 import Remodel from './Remodel';
+import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Wind, Heart, Clock, DollarSign, Cigarette, X, Plus, Sparkles, Flame, Activity, Brain, Settings,
-  Play, Pause, RotateCcw, ShieldCheck, Leaf, Droplets, Bell, Download, Smartphone, Wallet, Crown, Lock,
+  Play, Pause, RotateCcw, ShieldCheck, Leaf, Droplets, Download, Smartphone, Wallet, Crown, Lock,
   BarChart3, CalendarDays, Gift, Plane, Milk, ShoppingBag, BookOpen, Phone, Info, Zap, TrendingUp,
   PiggyBank, Check, Star, Quote, Menu, LayoutDashboard, NotebookPen, Trophy, LifeBuoy, ArrowRight,
   MapPin, Upload, Share2, Instagram, Facebook, ExternalLink, QrCode, Copy, ChevronDown, Users, TimerReset,
@@ -89,6 +90,7 @@ export default function App() {
   const [journalMood, setJournalMood] = useState<JournalEntry['mood']>('ok');
   const [breathPhase, setBreathPhase] = useState<'inhale' | 'hold' | 'exhale' | 'rest'>('inhale');
   const [breathRunning, setBreathRunning] = useState(false);
+  const [breathSessionActive, setBreathSessionActive] = useState(false);
   const [breathCount, setBreathCount] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [sosUses, setSosUses] = useState(() => {
@@ -101,7 +103,6 @@ export default function App() {
   const [showSuccessCelebration, setShowSuccessCelebration] = useState(false);
   // The fabricated "community saved" counter was removed deliberately. It was never
   // rendered, and no such aggregate exists. Do not reintroduce invented social proof.
-  const [utm, setUtm] = useState<Record<string, string>>({});
   const [referral, setReferral] = useState<string>('');
 
   // Share modal
@@ -168,12 +169,10 @@ export default function App() {
         const v = p.get(k); if (v) utmObj[k] = v;
       });
       if (Object.keys(utmObj).length) {
-        setUtm(utmObj);
         if (utmObj.ref) setReferral(utmObj.ref);
         else if (utmObj.utm_source) setReferral(`${utmObj.utm_source}/${utmObj.utm_medium || 'organic'}`);
         localStorage.setItem('clear_utm', JSON.stringify(utmObj));
       } else {
-        const stored = localStorage.getItem('clear_utm'); if (stored) setUtm(JSON.parse(stored));
         const r = localStorage.getItem('clear_referral'); if (r) setReferral(r);
       }
       const sessionId = p.get('session_id');
@@ -292,11 +291,47 @@ export default function App() {
   }, [cravings]);
 
   const addCraving = () => {
-    if (!isPremium && sosUses >= 3) { openPaywall('Unlimited SOS & Craving Log'); return; }
     const c: Craving = { id: Date.now().toString(), time: new Date(), intensity: cravingIntensity, trigger: cravingTrigger, passed: false, note: cravingNote.trim() || undefined };
-    setCravings([c, ...cravings]); setShowCravingForm(false); setCravingNote(''); setShowSOSFull(true); setBreathRunning(true); setBreathPhase('inhale'); setSosUses(s => s + 1);
+    setCravings([c, ...cravings]);
+    setShowCravingForm(false);
+    setCravingNote('');
+    setActiveTab('sos');
+    pushToast({ title: 'Craving logged', body: 'Logging is always free. Start breathing if you want guided support.' });
   };
   const markCravingPassed = (id: string) => setCravings(cravings.map(c => c.id === id ? { ...c, passed: true } : c));
+  const resetBreathing = () => {
+    setBreathRunning(false);
+    setBreathSessionActive(false);
+    setBreathCount(0);
+    setBreathPhase('inhale');
+  };
+  const toggleBreathing = () => {
+    if (breathRunning) {
+      setBreathRunning(false);
+      return;
+    }
+    if (!breathSessionActive) {
+      if (!canStartGuidedBreathing(isPremium, sosUses)) {
+        openPaywall('Unlimited guided breathing');
+        return;
+      }
+      setSosUses(uses => nextGuidedUseCount(isPremium, uses));
+      setBreathSessionActive(true);
+      setBreathCount(0);
+      setBreathPhase('inhale');
+    }
+    setBreathRunning(true);
+  };
+  const beatCurrentCraving = () => {
+    const id = cravings.find(c => !c.passed)?.id;
+    if (id) markCravingPassed(id);
+    resetBreathing();
+    setShowSOSFull(false);
+    pushToast({
+      title: id ? 'Craving beaten 💪' : 'Breathing complete',
+      body: id ? `${cravingsPassed + 1} cravings defeated.` : 'You gave yourself space before acting.',
+    });
+  };
   const addJournal = () => { if (!journalText.trim()) return; setJournals([{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals]); setJournalText(''); pushToast({ title: 'Journal saved', body: 'Your entry is stored locally. Keep going!' }); };
 
   const handleCheckout = async (plan: 'monthly' | 'yearly' | 'lifetime') => {
@@ -549,8 +584,8 @@ export default function App() {
                 <div className="lg:col-span-7">
                   <div className="rounded-[28px] bg-[#131315] border border-white/[0.08] p-6 lg:p-8">
                     <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • 4-7-8</div><div className="text-[11px] text-white/40">Free • Unlimited with clear-plus1.0 • {sosUses}/3 today {isPremium ? '(Plus: unlimited)' : ''}</div></div></div>
-                      {!isPremium && sosUses >= 3 && <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300">Limit reached</span>}
+                      <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • 4-7-8</div><div className="text-[11px] text-white/40">{isPremium ? 'Premium • Unlimited guided sessions' : `${Math.max(0, FREE_GUIDED_SESSIONS - sosUses)} of ${FREE_GUIDED_SESSIONS} free guided sessions remaining today`} • Craving logs are always free</div></div></div>
+                      {!isPremium && sosUses >= FREE_GUIDED_SESSIONS && !breathSessionActive && <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300">Guided limit reached</span>}
                     </div>
                     <div className="flex flex-col items-center text-center py-6">
                       <div className="text-[11px] tracking-[0.2em] uppercase font-bold text-white/30">Round {breathCount + 1} • {breathPhase}</div>
@@ -561,18 +596,14 @@ export default function App() {
                         <div className="relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div>
                       </div>
                       <div className="mt-8 flex items-center gap-3">
-                        <button onClick={() => {
-                          if (!isPremium && sosUses >= 3) { openPaywall('Unlimited SOS'); return; }
-                          if (!breathRunning) setSosUses(s => s + 1);
-                          setBreathRunning(!breathRunning);
-                        }} className="h-12 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90">
+                        <button onClick={toggleBreathing} className="h-12 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90">
                           {breathRunning ? <><Pause className="w-4 h-4" /> Pause</> : <><Play className="w-4 h-4" /> Start breathing</>}
                         </button>
                         <button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button>
                       </div>
                     </div>
                     <div className="mt-6 flex gap-3">
-                      <button onClick={() => { const id = cravings.find(c => !c.passed)?.id; if (id) markCravingPassed(id); pushToast({ title: 'Craving beaten 💪', body: `${cravingsPassed + 1} cravings defeated.` }); }} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
+                      <button onClick={beatCurrentCraving} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
                       <button onClick={() => setShowCravingForm(true)} className="h-12 px-5 rounded-full bg-white/[0.06] border border-white/[0.10] text-[13px]">Log craving</button>
                     </div>
                   </div>
@@ -692,11 +723,6 @@ export default function App() {
                         <div className="mt-3 flex gap-1.5">{[20, 25, 30].map(s => (<button key={s} onClick={() => setPackSize(s)} className={`flex-1 h-10 rounded-[12px] text-[12px] font-bold border ${packSize === s ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{s} / pack</button>))}</div>
                       </div>
 
-                      <div className="rounded-[16px] bg-[#101012] border border-white/[0.08] p-4">
-                        <div className="flex items-center justify-between mb-3"><div className="text-[11px] font-bold tracking-widest uppercase text-white/30 flex items-center gap-2"><Bell className="w-4 h-4 text-violet-300" /> UTM & Referral</div><span className="text-[10px] px-2 py-1 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40">{referral || 'no ref'}</span></div>
-                        <div className="text-[11px] text-white/40">Stored locally. Landing → App handoff keeps ref. Displayed for launch tracking.</div>
-                        {Object.keys(utm).length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{Object.entries(utm).map(([k, v]) => <span key={k} className="px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[10px]">{k}={v}</span>)}</div>}
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -709,7 +735,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Timer, basic savings, 3 SOS/day, 7-day history</div></div>
+                        <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Unlimited craving logs, timer, basic savings, 3 guided breathing sessions per day, 7-day history</div></div>
                         <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to clear-plus1.0 from $9.99/mo</button>
                       </div>
                     )}
@@ -737,7 +763,7 @@ export default function App() {
         </>
       )}
 
-      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Unlimited craving logs, savings charts and progress rewards. Your free timer, calculator and five-minute pause remain available.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">Progress is stored in this browser. Clearing browser data removes saved progress.</p></section></div>}
+      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">Progress is stored in this browser. Clearing browser data removes saved progress.</p></section></div>}
 
       {/* Share Modal */}
       {showShare && (
@@ -818,9 +844,9 @@ export default function App() {
           <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-8 text-center">
             <div className="mb-8"><div className="text-[11px] tracking-[0.2em] uppercase font-bold text-white/30">Round {breathCount + 1} • {breathPhase}</div><div className="mt-2 text-[28px] font-[800] capitalize">{breathPhase === 'inhale' ? 'Breathe in slowly' : breathPhase === 'hold' ? 'Hold' : breathPhase === 'exhale' ? 'Breathe out fully' : 'Rest'}</div></div>
             <div className="relative w-[260px] h-[260px] flex items-center justify-center"><div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} /><div className={`absolute rounded-full bg-gradient-to-br from-emerald-400 to-teal-400 shadow-[0_0_60px_rgba(16,185,129,0.5)] transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} /><div className="relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div></div>
-            <div className="mt-10 flex items-center gap-3"><button onClick={() => setBreathRunning(!breathRunning)} className="h-12 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2"><Play className="w-4 h-4" />{breathRunning ? 'Pause' : 'Start'}</button><button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button></div>
+            <div className="mt-10 flex items-center gap-3"><button onClick={toggleBreathing} className="h-12 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2"><Play className="w-4 h-4" />{breathRunning ? 'Pause' : 'Start'}</button><button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button></div>
           </div>
-          <div className="relative z-10 p-6 flex gap-3"><button onClick={() => { const id = cravings.find(c => !c.passed)?.id; if (id) markCravingPassed(id); setShowSOSFull(false); setBreathRunning(false); }} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button><button onClick={() => { setShowSOSFull(false); setBreathRunning(false); }} className="h-12 px-6 rounded-full bg-white/[0.08] border border-white/[0.10] text-[13px]">Close</button></div>
+          <div className="relative z-10 p-6 flex gap-3"><button onClick={beatCurrentCraving} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button><button onClick={() => { setShowSOSFull(false); resetBreathing(); }} className="h-12 px-6 rounded-full bg-white/[0.08] border border-white/[0.10] text-[13px]">Close</button></div>
         </div>
       )}
 
@@ -834,7 +860,7 @@ export default function App() {
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Intensity {cravingIntensity}/10</label><input type="range" min={1} max={10} value={cravingIntensity} onChange={e => setCravingIntensity(parseInt(e.target.value))} className="w-full accent-white" /></div>
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Trigger</label><div className="grid grid-cols-3 gap-2">{['Stress', 'Coffee', 'After meal', 'Boredom', 'Social', 'Driving'].map(t => (<button key={t} onClick={() => setCravingTrigger(t)} className={`h-9 rounded-full text-[11px] font-medium border transition ${cravingTrigger === t ? 'bg-white text-black border-white' : 'bg-white/[0.05] border-white/[0.08] text-white/60'}`}>{t}</button>))}</div></div>
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Note (optional)</label><input value={cravingNote} onChange={e => setCravingNote(e.target.value)} placeholder="What helped?" className="w-full h-11 px-4 rounded-[12px] bg-white/[0.06] border border-white/[0.10] text-[13px] placeholder:text-white/30 focus:outline-none" /></div>
-              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> Log & Breathe</button>
+              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> Save craving</button>
             </div>
           </div>
         </div>
