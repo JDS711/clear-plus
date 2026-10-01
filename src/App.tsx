@@ -34,6 +34,12 @@ const THEME_OPTIONS: Array<{ id: AppTheme; label: string; swatch: string }> = [
   { id: 'rose', label: 'Pink red', swatch: '#dd7f8a' },
   { id: 'blue', label: 'Blue grey', swatch: '#789fb8' },
 ];
+const SYSTEM_THEME_COLORS: Record<AppTheme, Record<DisplayMode, string>> = {
+  green: { light: '#3f8159', night: '#4f9568' },
+  warm: { light: '#9b6622', night: '#a9742f' },
+  rose: { light: '#9e4a56', night: '#a95460' },
+  blue: { light: '#486f86', night: '#557f97' },
+};
 const FONT_OPTIONS: Array<{ id: AppFont; label: string; stack: string }> = [
   { id: 'segoe', label: 'Segoe UI', stack: 'Segoe UI, Arial, sans-serif' },
   { id: 'arial', label: 'Arial', stack: 'Arial, sans-serif' },
@@ -272,6 +278,13 @@ export default function App() {
       if (referral) localStorage.setItem('clear_referral', referral);
     } catch {}
   }, [quitDate, cigsPerDay, costPerPack, packSize, sosUses, mode, referral, appTheme, appFont, displayMode, textSize]);
+
+  useEffect(() => {
+    const colour = SYSTEM_THEME_COLORS[appTheme][displayMode];
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', colour);
+    document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.setAttribute('content', displayMode === 'night' ? 'black-translucent' : 'default');
+    document.documentElement.style.backgroundColor = displayMode === 'night' ? '#181a1e' : colour;
+  }, [appTheme, displayMode]);
 
   useEffect(() => {
     try { localStorage.setItem('clear_cravings', JSON.stringify(cravings)); } catch {}
@@ -906,18 +919,18 @@ export default function App() {
                       <div className="mt-2 text-[26px] font-[800] capitalize">{breathPhase === 'inhale' ? 'Breathe in slowly' : breathPhase === 'hold' ? 'Hold' : breathPhase === 'exhale' ? 'Breathe out fully' : 'Rest'}</div>
                       <div className="relative w-[260px] h-[260px] flex items-center justify-center mt-8">
                         <div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} />
-                        <div className={`absolute rounded-full bg-gradient-to-br from-emerald-400 to-teal-400 shadow-[0_0_60px_rgba(16,185,129,0.5)] transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} />
+                        <div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} />
                         <div className="relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div>
                       </div>
                       <div className="mt-8 flex items-center gap-3">
-                        <button onClick={toggleBreathing} className="h-12 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90">
+                        <button onClick={toggleBreathing} className="app-accent-fill h-12 px-6 rounded-full font-bold text-[13px] flex items-center gap-2">
                           {breathRunning ? <><Pause className="w-4 h-4" /> Pause</> : <><Play className="w-4 h-4" /> Start breathing</>}
                         </button>
                         <button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button>
                       </div>
                     </div>
                     <div className="mt-6 flex gap-3">
-                      <button onClick={beatCurrentCraving} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
+                      <button onClick={beatCurrentCraving} className="app-accent-fill flex-1 h-12 rounded-full font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
                       <button onClick={() => setShowCravingForm(true)} className="h-12 px-5 rounded-full bg-white/[0.06] border border-white/[0.10] text-[13px]">Log craving</button>
                     </div>
                   </div>
@@ -1232,14 +1245,14 @@ export default function App() {
       {/* SOS Fullscreen */}
       {showSOSFull && activeTab !== 'sos' && mode === 'app' && (
         <div className="fixed inset-0 z-[60] flex flex-col bg-[#08080a]">
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/[0.15] via-violet-500/[0.08] to-sky-500/[0.10]" />
+          <div className="sos-accent-wash absolute inset-0" />
           <div className="relative z-10 flex items-center justify-between p-6"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[13px] font-bold">Breathing exercise</div><div className="text-[11px] text-white/40">4-7-8 • Craving will pass</div></div></div><button onClick={() => { setShowSOSFull(false); setBreathRunning(false); }} className="w-10 h-10 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><X className="w-5 h-5" /></button></div>
           <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-8 text-center">
             <div className="mb-8"><div className="text-[11px] tracking-[0.2em] uppercase font-bold text-white/30">Round {breathCount + 1} • {breathPhase}</div><div className="mt-2 text-[28px] font-[800] capitalize">{breathPhase === 'inhale' ? 'Breathe in slowly' : breathPhase === 'hold' ? 'Hold' : breathPhase === 'exhale' ? 'Breathe out fully' : 'Rest'}</div></div>
-            <div className="relative w-[260px] h-[260px] flex items-center justify-center"><div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} /><div className={`absolute rounded-full bg-gradient-to-br from-emerald-400 to-teal-400 shadow-[0_0_60px_rgba(16,185,129,0.5)] transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} /><div className="relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div></div>
-            <div className="mt-10 flex items-center gap-3"><button onClick={toggleBreathing} className="h-12 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2"><Play className="w-4 h-4" />{breathRunning ? 'Pause' : 'Start'}</button><button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button></div>
+            <div className="relative w-[260px] h-[260px] flex items-center justify-center"><div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} /><div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} /><div className="relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div></div>
+            <div className="mt-10 flex items-center gap-3"><button onClick={toggleBreathing} className="app-accent-fill h-12 px-6 rounded-full font-bold text-[13px] flex items-center gap-2"><Play className="w-4 h-4" />{breathRunning ? 'Pause' : 'Start'}</button><button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button></div>
           </div>
-          <div className="relative z-10 p-6 flex gap-3"><button onClick={beatCurrentCraving} className="flex-1 h-12 rounded-full bg-emerald-500 text-black font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button><button onClick={() => { setShowSOSFull(false); resetBreathing(); }} className="h-12 px-6 rounded-full bg-white/[0.08] border border-white/[0.10] text-[13px]">Close</button></div>
+          <div className="relative z-10 p-6 flex gap-3"><button onClick={beatCurrentCraving} className="app-accent-fill flex-1 h-12 rounded-full font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button><button onClick={() => { setShowSOSFull(false); resetBreathing(); }} className="h-12 px-6 rounded-full bg-white/[0.08] border border-white/[0.10] text-[13px]">Close</button></div>
         </div>
       )}
 
