@@ -159,6 +159,7 @@ export default function App() {
   const [cravingIntensity, setCravingIntensity] = useState(6);
   const [cravingTrigger, setCravingTrigger] = useState('Stress');
   const [cravingNote, setCravingNote] = useState('');
+  const [cravingLogOutcome, setCravingLogOutcome] = useState<'logged' | 'beaten'>('logged');
   const [journalText, setJournalText] = useState('');
   const [journalMood, setJournalMood] = useState<JournalEntry['mood']>('ok');
   const [breathPhase, setBreathPhase] = useState<'inhale' | 'hold' | 'exhale' | 'rest'>('inhale');
@@ -192,6 +193,7 @@ export default function App() {
   const [shareType, setShareType] = useState<ShareType>('money');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const lastWheelNavRef = useRef(0);
 
   const [cravings, setCravings] = useState<Craving[]>(() => {
   try {
@@ -582,18 +584,18 @@ export default function App() {
   }, [days, hours, dailyCost, yearlyCost]);
 
   const addCraving = () => {
-    const c: Craving = { id: Date.now().toString(), time: new Date(), intensity: cravingIntensity, trigger: cravingTrigger, passed: false, note: cravingNote.trim() || undefined };
+    const wasBeaten = cravingLogOutcome === 'beaten';
+    const c: Craving = { id: Date.now().toString(), time: new Date(), intensity: cravingIntensity, trigger: cravingTrigger, passed: wasBeaten, note: cravingNote.trim() || undefined };
     const next = [c, ...cravings];
     try { localStorage.setItem('clear_cravings', JSON.stringify(next)); } catch {}
     setCravings(next);
     setShowCravingForm(false);
     setCravingNote('');
-    pushToast({ title: 'Craving logged', body: user ? 'Saved and syncing to your account.' : 'Saved on this device.' });
-  };
-  const markCravingPassed = (id: string) => {
-    const next = cravings.map(c => c.id === id ? { ...c, passed: true } : c);
-    try { localStorage.setItem('clear_cravings', JSON.stringify(next)); } catch {}
-    setCravings(next);
+    setCravingLogOutcome('logged');
+    pushToast({
+      title: wasBeaten ? 'Craving beaten and logged 💪' : 'Craving logged',
+      body: user ? 'Saved and syncing to your account.' : 'Saved on this device.',
+    });
   };
   const resetBreathing = () => {
     setBreathRunning(false);
@@ -619,15 +621,16 @@ export default function App() {
     setBreathRunning(true);
   };
   const beatCurrentCraving = () => {
-    const id = cravings.find(c => !c.passed)?.id;
-    if (id) markCravingPassed(id);
     resetBreathing();
     setShowSOSFull(false);
-    pushToast({
-      title: id ? 'Craving beaten 💪' : 'Breathing complete',
-      body: id ? `${cravingsPassed + 1} cravings defeated.` : 'You gave yourself space before acting.',
-    });
+    setCravingLogOutcome('beaten');
+    setShowCravingForm(true);
   };
+  useEffect(() => {
+    if (activeTab !== 'sos' && !showSOSFull) resetBreathing();
+    // Reset only when leaving the breathing experience.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, showSOSFull]);
   const addJournal = () => {
     if (!journalText.trim()) return;
     const next = [{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals];
@@ -742,6 +745,33 @@ export default function App() {
       document.getElementById('cost-assumptions')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 50);
   };
+  const moveTab = (direction: -1 | 1) => {
+    const currentIndex = TAB_ORDER.indexOf(activeTab);
+    const nextIndex = Math.max(0, Math.min(TAB_ORDER.length - 1, currentIndex + direction));
+    if (nextIndex !== currentIndex) setActiveTab(TAB_ORDER[nextIndex]);
+  };
+  useEffect(() => {
+    const handleArrowNavigation = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, button, a, [role="slider"], [contenteditable="true"]')) return;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      moveTab(event.key === 'ArrowRight' ? 1 : -1);
+    };
+    window.addEventListener('keydown', handleArrowNavigation);
+    return () => window.removeEventListener('keydown', handleArrowNavigation);
+    // Rebind with the current section.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+  const handleWheelNavigation = (event: React.WheelEvent) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, button, a, [role="slider"], [data-no-swipe]')) return;
+    if (Math.abs(event.deltaX) < 55 || Math.abs(event.deltaX) < Math.abs(event.deltaY) * 1.2) return;
+    const nowMs = Date.now();
+    if (nowMs - lastWheelNavRef.current < 500) return;
+    lastWheelNavRef.current = nowMs;
+    moveTab(event.deltaX > 0 ? 1 : -1);
+  };
   const handleTouchStart = (event: React.TouchEvent) => {
     const touch = event.touches[0];
     const target = event.target as HTMLElement;
@@ -757,11 +787,7 @@ export default function App() {
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
     if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
-    const currentIndex = TAB_ORDER.indexOf(activeTab);
-    const nextIndex = dx < 0
-      ? Math.min(TAB_ORDER.length - 1, currentIndex + 1)
-      : Math.max(0, currentIndex - 1);
-    if (nextIndex !== currentIndex) setActiveTab(TAB_ORDER[nextIndex]);
+    moveTab(dx < 0 ? 1 : -1);
   };
 
   const enterApp = (refSource?: string) => {
@@ -781,6 +807,7 @@ export default function App() {
       style={{ '--app-font': FONT_OPTIONS.find(option => option.id === appFont)?.stack } as React.CSSProperties}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
+      onWheel={handleWheelNavigation}
     >
       {/* Celebration */}
       {showSuccessCelebration && (
@@ -858,7 +885,7 @@ export default function App() {
           )}
 
           <main key={activeTab} className="tab-panel relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
-            {activeTab === 'dashboard' && <Remodel quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => setShowCravingForm(true)} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
+            {activeTab === 'dashboard' && <Remodel quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
             {activeTab === 'analytics' && (
                 <div className="lg:col-span-5 space-y-6">
                   {/* Premium Analytics */}
@@ -937,21 +964,20 @@ export default function App() {
                         <button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button>
                       </div>
                     </div>
-                    <div className="mt-6 flex gap-3">
-                      <button onClick={beatCurrentCraving} className="app-accent-fill flex-1 h-12 rounded-full font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
-                      <button onClick={() => setShowCravingForm(true)} className="h-12 px-5 rounded-full bg-white/[0.06] border border-white/[0.10] text-[13px]">Log craving</button>
+                    <div className="mt-6">
+                      <button onClick={beatCurrentCraving} className="app-accent-fill w-full h-12 rounded-full font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button>
                     </div>
                   </div>
                 </div>
                 <div className="lg:col-span-5 space-y-6">
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-5">
-                    <div className="flex items-center justify-between mb-4"><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Craving Log</h2><span className="text-[11px] px-2 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-300">{cravings.filter(c => !c.passed).length} active</span></div>
+                    <div className="flex items-center justify-between mb-4"><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Craving Log</h2><span className="text-[11px] text-white/35">{cravings.length} logged</span></div>
                     <div className="space-y-2 max-h-[420px] overflow-auto pr-1">
                       {cravings.map(c => (
-                        <div key={c.id} className={`flex items-center gap-3 p-3 rounded-[14px] border ${c.passed ? 'bg-white/[0.03] border-white/[0.04] opacity-60' : 'bg-white/[0.05] border-white/[0.08]'}`}>
-                          <div className={`w-9 h-9 rounded-[10px] flex items-center justify-center text-[12px] font-bold shrink-0 ${c.intensity > 7 ? 'bg-rose-500/15 text-rose-300' : c.intensity > 4 ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}>{c.intensity}</div>
+                        <div key={c.id} className="flex items-center gap-3 p-3 rounded-[14px] border bg-white/[0.04] border-white/[0.07]">
+                          <div className="app-accent-soft min-w-[78px] h-9 px-2 rounded-[10px] flex items-center justify-center text-[11px] font-bold shrink-0">Intensity {c.intensity}/10</div>
                           <div className="flex-1 min-w-0"><div className="text-[12px] font-medium flex items-center gap-2"><span className="truncate">{c.trigger}</span><span className="text-[10px] text-white/30">• {new Date(c.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>{c.note && <div className="text-[11px] text-white/40 truncate mt-0.5">{c.note}</div>}</div>
-                          {!c.passed ? <button onClick={() => markCravingPassed(c.id)} className="h-7 px-2.5 rounded-full bg-white text-black text-[11px] font-bold">I passed</button> : <span className="text-[11px] text-emerald-300">✓ Passed</span>}
+                          <span className={c.passed ? 'text-[11px] font-bold text-emerald-300' : 'text-[11px] text-white/35'}>{c.passed ? '✓ Beaten' : 'Logged'}</span>
                         </div>
                       ))}
                     </div>
@@ -1267,14 +1293,18 @@ export default function App() {
       {/* Craving form */}
       {showCravingForm && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-xl" onClick={() => setShowCravingForm(false)} />
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-xl" onClick={() => { setShowCravingForm(false); setCravingLogOutcome('logged'); }} />
           <div className="relative w-full sm:max-w-[400px] rounded-t-[24px] sm:rounded-[24px] bg-[#161618] border border-white/[0.10] p-6">
-            <div className="flex items-center justify-between mb-5"><h3 className="font-bold">Log craving</h3><button onClick={() => setShowCravingForm(false)} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
+            <div className="flex items-center justify-between mb-5"><h3 className="font-bold">{cravingLogOutcome === 'beaten' ? 'Log the craving you beat' : 'Log craving'}</h3><button onClick={() => { setShowCravingForm(false); setCravingLogOutcome('logged'); }} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
             <div className="space-y-4">
-              <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Intensity {cravingIntensity}/10</label><input type="range" min={1} max={10} value={cravingIntensity} onChange={e => setCravingIntensity(parseInt(e.target.value))} className="w-full accent-white" /></div>
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Trigger</label><div className="grid grid-cols-3 gap-2">{['Stress', 'Coffee', 'After meal', 'Boredom', 'Social', 'Driving'].map(t => (<button key={t} onClick={() => setCravingTrigger(t)} className={`h-9 rounded-full text-[11px] font-medium border transition ${cravingTrigger === t ? 'bg-white text-black border-white' : 'bg-white/[0.05] border-white/[0.08] text-white/60'}`}>{t}</button>))}</div></div>
+              <div className="rounded-[16px] bg-white/[0.04] border border-white/[0.08] p-4">
+                <div className="flex items-center justify-between mb-4"><label htmlFor="craving-intensity" className="text-[11px] uppercase tracking-widest font-bold text-white/40">Intensity</label><strong className="app-accent-soft min-w-14 h-8 px-2 rounded-full flex items-center justify-center text-[13px]">{cravingIntensity}/10</strong></div>
+                <input id="craving-intensity" aria-label="Craving intensity" type="range" min={1} max={10} value={cravingIntensity} onChange={e => setCravingIntensity(parseInt(e.target.value))} className="craving-intensity w-full" style={{ background: `linear-gradient(to right, var(--theme-accent) 0%, var(--theme-accent) ${((cravingIntensity - 1) / 9) * 100}%, var(--theme-soft) ${((cravingIntensity - 1) / 9) * 100}%, var(--theme-soft) 100%)` }} />
+                <div className="mt-3 flex justify-between text-[10px] text-white/35"><span>1 • Mild</span><span>10 • Intense</span></div>
+              </div>
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Note (optional)</label><input value={cravingNote} onChange={e => setCravingNote(e.target.value)} placeholder="What helped?" className="w-full h-11 px-4 rounded-[12px] bg-white/[0.06] border border-white/[0.10] text-[13px] placeholder:text-white/30 focus:outline-none" /></div>
-              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> Save craving</button>
+              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> {cravingLogOutcome === 'beaten' ? 'Save as beaten' : 'Save craving'}</button>
             </div>
           </div>
         </div>
