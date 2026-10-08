@@ -22,3 +22,12 @@ This branch is for preview testing before production. It does not publish an And
 
 ## Remaining store work
 Android packaging, Google Play Billing or an approved regional billing programme, health declaration, Data Safety form, account deletion, store assets and required closed testing remain separate work. A successful web build is not Play Store approval.
+
+## Sync and appearance follow-up
+- Both devices must sign in to the same email and use the same app origin. Browser-local data is separate between production and Vercel previews.
+- Visible signed-in devices refresh cloud data every 15 seconds; a manual refresh and specific error status are available.
+- Settings carry a last-edit timestamp independent of history size. Concurrent row updates use compare-and-swap on updated_at, with bounded retries. Device clock skew can affect last-edit ordering; this is not a substitute for backend RLS verification.
+- Test real phone/PC sync after checking the deployed user_state table and policies; mocked sync tests do not certify the live database.
+- The comic option uses bundled OFL-licensed Comic Neue, not unlicensed distribution of Microsoft Comic Sans.
+- Colour controls are four unlabelled visual swatches with accessible names and keyboard focus.
+- The brand smoke/wind icon is fixed green and shared across the header/favicon/home-screen assets. Old installed shortcuts can cache icons; removal and re-addition may be necessary. No native store icon has been published.

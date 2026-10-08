@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm test && npm run typecheck && vite build",
+    "build": "node scripts/generate-icons.mjs && npm test && npm run typecheck && vite build",
     "preview": "vite preview",
     "test": "node --test lib/*.test.js",
     "typecheck": "tsc --noEmit"

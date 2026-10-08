@@ -44,3 +44,12 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 .clear-shell[data-text-size="large"] input,.clear-shell[data-text-size="large"] button{font-size:max(16px,1em)}
 @media(max-width:720px){.baseline-summary button{width:100%;margin-left:0}.achievement-card{min-height:104px}}
 @media(prefers-reduced-motion:reduce){.clear-shell *{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+/* Bundled comic font and readable appearance controls on every platform. */
+.clear-shell,.clear-shell .remodel{font-family:var(--app-font,system-ui),sans-serif}
+.clear-shell button,.clear-shell input,.clear-shell select,.clear-shell textarea{font-family:inherit}
+.accent-tiles{display:grid;grid-template-columns:repeat(4,minmax(44px,1fr));gap:12px}
+.clear-shell .accent-tile{min-height:54px;border-radius:14px;border:3px solid transparent;box-shadow:inset 0 0 0 1px #0002}
+.clear-shell .accent-tile[aria-pressed="true"]{outline:3px solid var(--theme-text);outline-offset:3px;border-color:var(--theme-surface)}
+.clear-shell .accent-tile:focus-visible{outline:3px solid var(--theme-text);outline-offset:3px}
+.clear-shell .piggy-accent{color:var(--theme-accent)}

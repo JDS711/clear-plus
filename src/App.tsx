@@ -6,6 +6,8 @@ import type { User } from '@supabase/supabase-js';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { buildSavingsProjection } from '../lib/progress.js';
 import { reconcileCloudStates } from '../lib/cloud-sync.js';
+import { saveCloudState, syncErrorLabel } from '../lib/cloud-store.js';
+import './comic-font.css';
 import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -54,7 +56,7 @@ const FONT_OPTIONS: Array<{ id: AppFont; label: string; stack: string }> = [
   { id: 'trebuchet', label: 'Trebuchet MS', stack: 'Trebuchet MS, Arial, sans-serif' },
   { id: 'georgia', label: 'Georgia', stack: 'Georgia, serif' },
   { id: 'times', label: 'Times New Roman', stack: 'Times New Roman, serif' },
-  { id: 'comic', label: 'Comic Sans MS', stack: 'Comic Sans MS, cursive' },
+  { id: 'comic', label: 'Comic (Comic Neue)', stack: '"Clear Comic", cursive' },
   { id: 'courier', label: 'Courier New', stack: 'Courier New, monospace' },
   { id: 'calibri', label: 'Calibri', stack: 'Calibri, Arial, sans-serif' },
   { id: 'tahoma', label: 'Tahoma', stack: 'Tahoma, Verdana, sans-serif' },
@@ -80,10 +82,16 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('app');
 
   // === CORE STATE ===
-  const [region, setRegion] = useState(() => {
+  const [settingsUpdatedAt, setSettingsUpdatedAt] = useState(() => {
+    try { return Number(localStorage.getItem('clear_settingsUpdatedAt')) || 0; } catch { return 0; }
+  });
+  const markSettingsChanged = () => setSettingsUpdatedAt(previous => Math.max(Date.now(), previous + 1));
+  useEffect(() => { try { localStorage.setItem('clear_settingsUpdatedAt', String(settingsUpdatedAt)); } catch {} }, [settingsUpdatedAt]);
+
+  const [region, setRegionRaw] = useState(() => {
     try { return validRegion(localStorage.getItem('clear_region')); } catch { return 'AU'; }
   });
-  const [currency, setCurrency] = useState(() => {
+  const [currency, setCurrencyRaw] = useState(() => {
     try { return validCurrency(localStorage.getItem('clear_currency'), validRegion(localStorage.getItem('clear_region'))); } catch { return 'AUD'; }
   });
   const support = REGIONS[region];
@@ -101,7 +109,7 @@ export default function App() {
     try { localStorage.setItem('clear_region', region); localStorage.setItem('clear_currency', currency); } catch {}
   }, [region, currency]);
 
-  const [quitDate, setQuitDate] = useState<Date | null>(() => {
+  const [quitDate, setQuitDateRaw] = useState<Date | null>(() => {
     try {
       const stored = localStorage.getItem('clear_quitDate');
       const date = stored ? new Date(stored) : null;
@@ -109,13 +117,13 @@ export default function App() {
     } catch {}
     return null;
   });
-  const [cigsPerDay, setCigsPerDay] = useState(() => {
+  const [cigsPerDay, setCigsPerDayRaw] = useState(() => {
     try { const v = localStorage.getItem('clear_cigsPerDay'); return v ? parseInt(v) : 20; } catch { return 20; }
   });
-  const [costPerPack, setCostPerPack] = useState(() => {
+  const [costPerPack, setCostPerPackRaw] = useState(() => {
     try { const v = localStorage.getItem('clear_costPerPack'); return v ? parseFloat(v) : 50; } catch { return 50; }
   });
-  const [packSize, setPackSize] = useState(() => {
+  const [packSize, setPackSizeRaw] = useState(() => {
     try { const v = localStorage.getItem('clear_packSize'); return v ? parseInt(v) : 25; } catch { return 25; }
   });
   // Premium is NEVER read from storage.
@@ -136,23 +144,23 @@ export default function App() {
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState('Premium Analytics');
   const [billing, setBilling] = useState<'monthly' | 'yearly' | 'lifetime'>('yearly');
-  const [appTheme, setAppTheme] = useState<AppTheme>(() => {
+  const [appTheme, setAppThemeRaw] = useState<AppTheme>(() => {
     try {
       const value = localStorage.getItem('clear_theme') as AppTheme | null;
       return THEME_OPTIONS.some(option => option.id === value) ? value! : 'green';
     } catch { return 'green'; }
   });
-  const [appFont, setAppFont] = useState<AppFont>(() => {
+  const [appFont, setAppFontRaw] = useState<AppFont>(() => {
     try {
       const value = localStorage.getItem('clear_font') as AppFont | null;
       return FONT_OPTIONS.some(option => option.id === value) ? value! : 'segoe';
     } catch { return 'segoe'; }
   });
-  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
+  const [displayMode, setDisplayModeRaw] = useState<DisplayMode>(() => {
     try { return localStorage.getItem('clear_displayMode') === 'night' ? 'night' : 'light'; }
     catch { return 'light'; }
   });
-  const [textSize, setTextSize] = useState<TextSize>(() => {
+  const [textSize, setTextSizeRaw] = useState<TextSize>(() => {
     try { return localStorage.getItem('clear_textSize') === 'large' ? 'large' : 'standard'; }
     catch { return 'standard'; }
   });
@@ -206,6 +214,8 @@ export default function App() {
   const [cloudReady, setCloudReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
   const [syncRequest, setSyncRequest] = useState(0);
+  const [syncError, setSyncError] = useState('');
+  const lastSyncedStateRef = useRef('');
   const [premiumSession, setPremiumSession] = useState(() => {
     try { return localStorage.getItem('clear_premium_session') || ''; } catch { return ''; }
   });
@@ -238,8 +248,20 @@ export default function App() {
   return [];
 });
 
+  const setRegion = (value: string) => { markSettingsChanged(); setRegionRaw(value); };
+  const setCurrency = (value: string) => { markSettingsChanged(); setCurrencyRaw(value); };
+  const setQuitDate = (value: Date | null) => { markSettingsChanged(); setQuitDateRaw(value); };
+  const setCigsPerDay = (value: number) => { markSettingsChanged(); setCigsPerDayRaw(value); };
+  const setCostPerPack = (value: number) => { markSettingsChanged(); setCostPerPackRaw(value); };
+  const setPackSize = (value: number) => { markSettingsChanged(); setPackSizeRaw(value); };
+  const setAppTheme = (value: AppTheme) => { markSettingsChanged(); setAppThemeRaw(value); };
+  const setAppFont = (value: AppFont) => { markSettingsChanged(); setAppFontRaw(value); };
+  const setDisplayMode = (value: DisplayMode) => { markSettingsChanged(); setDisplayModeRaw(value); };
+  const setTextSize = (value: TextSize) => { markSettingsChanged(); setTextSizeRaw(value); };
+
   const cloudState = useMemo(() => ({
-    version: 3,
+    version: 4,
+    settingsUpdatedAt,
     region,
     currency,
     quitDate: quitDate?.toISOString() || null,
@@ -255,22 +277,23 @@ export default function App() {
     displayMode,
     textSize,
     premiumSession: premiumSession || null,
-  }), [region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
+  }), [settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
 
   const applyCloudState = (state: Record<string, any>) => {
-    if (state.region) setRegion(validRegion(state.region));
-    if (state.currency) setCurrency(validCurrency(state.currency, state.region || region));
+    setSettingsUpdatedAt(Number(state.settingsUpdatedAt) || 0);
+    if (state.region) setRegionRaw(validRegion(state.region));
+    if (state.currency) setCurrencyRaw(validCurrency(state.currency, state.region || region));
     const syncedQuitDate = state.quitDate ? new Date(state.quitDate) : null;
-    if (!syncedQuitDate || Number.isFinite(syncedQuitDate.getTime())) setQuitDate(syncedQuitDate);
-    if (Number.isFinite(state.cigsPerDay)) setCigsPerDay(Math.max(1, state.cigsPerDay));
-    if (Number.isFinite(state.costPerPack)) setCostPerPack(Math.max(0, state.costPerPack));
-    if (Number.isFinite(state.packSize)) setPackSize(Math.max(1, state.packSize));
+    if (!syncedQuitDate || Number.isFinite(syncedQuitDate.getTime())) setQuitDateRaw(syncedQuitDate);
+    if (Number.isFinite(state.cigsPerDay)) setCigsPerDayRaw(Math.max(1, state.cigsPerDay));
+    if (Number.isFinite(state.costPerPack)) setCostPerPackRaw(Math.max(0, state.costPerPack));
+    if (Number.isFinite(state.packSize)) setPackSizeRaw(Math.max(1, state.packSize));
     if (Number.isFinite(state.sosUses)) setSosUses(Math.max(0, state.sosUses));
     if (typeof state.referral === 'string') setReferral(state.referral);
-    if (THEME_OPTIONS.some(option => option.id === state.appTheme)) setAppTheme(state.appTheme);
-    if (FONT_OPTIONS.some(option => option.id === state.appFont)) setAppFont(state.appFont);
-    if (state.displayMode === 'light' || state.displayMode === 'night') setDisplayMode(state.displayMode);
-    if (state.textSize === 'standard' || state.textSize === 'large') setTextSize(state.textSize);
+    if (THEME_OPTIONS.some(option => option.id === state.appTheme)) setAppThemeRaw(state.appTheme);
+    if (FONT_OPTIONS.some(option => option.id === state.appFont)) setAppFontRaw(state.appFont);
+    if (state.displayMode === 'light' || state.displayMode === 'night') setDisplayModeRaw(state.displayMode);
+    if (state.textSize === 'standard' || state.textSize === 'large') setTextSizeRaw(state.textSize);
 
     if (Array.isArray(state.cravings)) {
       setCravings(state.cravings.flatMap((item: any) => {
@@ -365,99 +388,61 @@ export default function App() {
   }, [user?.id, premiumSession]);
 
   useEffect(() => {
-    if (!user) {
-      setCloudReady(false);
-      setSyncStatus('local');
-      return;
-    }
-
+    if (!user) { setCloudReady(false); setSyncStatus('local'); lastSyncedStateRef.current = ''; return; }
     let cancelled = false;
-    setCloudReady(false);
-    setSyncStatus('loading');
-
+    setCloudReady(false); setSyncStatus('loading'); setSyncError('');
     const loadCloudState = async () => {
-      const { data, error } = await supabase
-        .from('user_state')
-        .select('state')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (cancelled) return;
-      if (error) {
-        setSyncStatus('error');
-        return;
-      }
-
-      const remote = data?.state as Record<string, any> | undefined;
-      const reconciled = reconcileCloudStates(cloudState, remote || {});
-      applyCloudState(reconciled);
-
-      const { error: saveError } = await supabase
-        .from('user_state')
-        .upsert({ user_id: user.id, state: reconciled, updated_at: new Date().toISOString() });
-      if (saveError) {
-        setSyncStatus('error');
-        return;
-      }
-
-      if (reconciled.premiumSession) {
-          verifyPurchase(reconciled.premiumSession)
-            .then(result => {
-              setIsPremium(!!result.paid);
-              if (result.paid && result.billing) setBilling(result.billing);
-              if (!result.paid && !result.needsSignIn && !result.temporary) setPremiumSession('');
-            })
-            .catch(() => {});
-      }
-
-      if (!cancelled) {
-        setCloudReady(true);
-        setSyncStatus('synced');
-      }
+      try {
+        const { data, error } = await supabase.from('user_state').select('state').eq('user_id', user.id).maybeSingle();
+        if (cancelled) return;
+        if (error) { setSyncError(syncErrorLabel(error)); setSyncStatus('error'); return; }
+        const remote = data?.state as Record<string, any> | undefined;
+        const merged = reconcileCloudStates(cloudState, remote || {});
+        const result = JSON.stringify(merged) === JSON.stringify(remote)
+          ? { state: merged }
+          : await saveCloudState(supabase, user.id, merged, { cancelled: () => cancelled });
+        if (cancelled || result.cancelled) return;
+        if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
+        lastSyncedStateRef.current = JSON.stringify(result.state);
+        applyCloudState(result.state);
+        setCloudReady(true); setSyncStatus('synced');
+      } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     };
-
     loadCloudState();
     return () => { cancelled = true; };
-    // The debounced save effect below handles subsequent state changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, syncRequest]);
 
   useEffect(() => {
-    if (!user || !cloudReady) return;
-    setSyncStatus('saving');
+    if (!user || !cloudReady || JSON.stringify(cloudState) === lastSyncedStateRef.current) return;
+    let cancelled = false;
+    setSyncStatus('saving'); setSyncError('');
     const timer = window.setTimeout(async () => {
-      const { data: latest, error: readError } = await supabase
-        .from('user_state')
-        .select('state')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (readError) {
-        setSyncStatus('error');
-        return;
-      }
-      // This effect only runs after local app state changes. On equal progress, the deliberate
-      // edit made on this device must win; otherwise every theme, font or cost edit immediately
-      // snaps back to the older cloud value.
-      const reconciled = reconcileCloudStates(cloudState, latest?.state || {}, { preferLocalSettings: true });
-      if (JSON.stringify(reconciled) !== JSON.stringify(cloudState)) applyCloudState(reconciled);
-      const { error } = await supabase
-        .from('user_state')
-        .upsert({ user_id: user.id, state: reconciled, updated_at: new Date().toISOString() });
-      setSyncStatus(error ? 'error' : 'synced');
+      try {
+        const result = await saveCloudState(supabase, user.id, cloudState, { cancelled: () => cancelled });
+        if (cancelled || result.cancelled) return;
+        if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
+        lastSyncedStateRef.current = JSON.stringify(result.state);
+        if (JSON.stringify(result.state) !== JSON.stringify(cloudState)) applyCloudState(result.state);
+        setSyncStatus('synced');
+      } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     }, 650);
-    return () => window.clearTimeout(timer);
-  }, [user, cloudReady, cloudState]);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [user?.id, cloudReady, cloudState]);
 
   useEffect(() => {
     if (!user) return;
-    const refresh = () => setSyncRequest(request => request + 1);
+    const refresh = () => { if (document.visibilityState === 'visible') setSyncRequest(request => request + 1); };
+    const interval = window.setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
+      window.clearInterval(interval);
       window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
     const onHashChange = () => setActiveTabState(tabFromHash());
@@ -895,7 +880,7 @@ export default function App() {
           {/* App Header */}
           <header className="app-header relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] backdrop-blur-2xl sticky top-0">
             <div className="flex items-center gap-4">
-              <button onClick={() => { setActiveTab('dashboard') }} className="app-accent-fill w-9 h-9 rounded-[12px] flex items-center justify-center font-bold"><Wind className="w-5 h-5" /></button>
+              <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="w-9 h-9 rounded-[12px] overflow-hidden"><img src="/favicon.svg?v=2" alt="" className="w-full h-full" /></button>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">clear-plus1.0</span>
@@ -1086,7 +1071,7 @@ export default function App() {
                     <div className="rewards-accent-wash absolute inset-0" />
                     <div className="relative p-6 lg:p-7">
                       <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-[10px] bg-amber-500/15 border border-amber-500/20 flex items-center justify-center"><PiggyBank className="w-4 h-4 text-amber-300" /></div><div><h2 className="text-[14px] font-bold">Pledge Jar • Your Savings, Visualized</h2><div className="text-[11px] text-white/40">Fill it with what you don't smoke.</div></div></div>
+                        <div className="flex items-center gap-3"><div className="app-accent-soft w-8 h-8 rounded-[10px] flex items-center justify-center"><PiggyBank className="piggy-accent w-4 h-4" /></div><div><h2 className="text-[14px] font-bold">Pledge Jar • Your Savings, Visualized</h2><div className="text-[11px] text-white/40">Fill it with what you don't smoke.</div></div></div>
                         <button onClick={() => { setShareType('money'); setShowShare(true); }} className="h-9 px-4 rounded-full bg-white text-black text-[12px] font-bold flex items-center gap-1.5"><Share2 className="w-4 h-4" /> Share</button>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-6 items-end">
@@ -1138,18 +1123,9 @@ export default function App() {
                       </div>
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Accent colour</div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="accent-tiles" role="group" aria-label="Accent colour">
                           {THEME_OPTIONS.map(option => (
-                            <button
-                              key={option.id}
-                              type="button"
-                              aria-pressed={appTheme === option.id}
-                              onClick={() => setAppTheme(option.id)}
-                              className={`min-h-11 rounded-[12px] border px-3 py-2 text-[12px] font-bold flex items-center gap-2 ${appTheme === option.id ? 'border-current bg-white/[0.10]' : 'border-white/[0.08] bg-white/[0.03]'}`}
-                            >
-                              <span className="w-4 h-4 rounded-full border border-black/10" style={{ background: option.swatch }} />
-                              {option.label}
-                            </button>
+                            <button key={option.id} type="button" className="accent-tile" aria-label={option.label} title={option.label} aria-pressed={appTheme === option.id} onClick={() => setAppTheme(option.id)} style={{ backgroundColor: option.swatch }} />
                           ))}
                         </div>
                       </div>
@@ -1217,16 +1193,16 @@ export default function App() {
                           <div className="text-[11px] uppercase tracking-widest text-white/35 font-bold">Signed in as</div>
                           <div className="text-[13px] font-bold mt-1 break-all">{user.email}</div>
                           <div className="text-[11px] text-white/45 mt-2">
-                            {syncStatus === 'synced' ? '✓ Progress synced' : syncStatus === 'saving' ? 'Syncing changes…' : syncStatus === 'loading' ? 'Loading your progress…' : syncStatus === 'error' ? 'Sync paused — check your connection' : 'Stored on this device'}
+                            {syncStatus === 'synced' ? '✓ Progress synced' : syncStatus === 'saving' ? 'Syncing changes…' : syncStatus === 'loading' ? 'Loading your progress…' : syncStatus === 'error' ? 'Sync paused — ' + syncError : 'Stored on this device'}
                           </div>
                         </div>
                         <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices.</p>
-                        <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Cloud className="w-4 h-4" /> Sync both devices now</button>
+                        <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Cloud className="w-4 h-4" /> Refresh this device from cloud</button>
                         <button onClick={signOut} className="w-full h-11 rounded-[12px] bg-white/[0.05] border border-white/[0.10] text-[12px] font-bold flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> Sign out</button>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <p className="text-[12px] leading-[1.55] text-white/50">Sign in on your phone and computer to keep progress and premium access together. No extra password required.</p>
+                        <p className="text-[12px] leading-[1.55] text-white/50">Sign in with the same email on your phone and computer, and use the same app address on both. The preview and live app have separate browser storage. No extra password required.</p>
                         <label className="text-[10px] uppercase tracking-widest font-bold text-white/35 block">Email address</label>
                         <input type="email" autoComplete="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') sendSignInLink(); }} placeholder="you@example.com" className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" />
                         <button disabled={authBusy || !authEmail.trim()} onClick={sendSignInLink} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 disabled:opacity-50"><Mail className="w-4 h-4" /> {authBusy ? 'Sending…' : 'Email me a sign-in link'}</button>
@@ -1264,7 +1240,7 @@ export default function App() {
           </main>
 
           <footer className="relative z-10 border-t border-white/[0.06] mt-8 py-4 px-4 lg:px-7 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-white/25">
-            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in {currency} • {support.supportName} {support.phone} • {user ? 'Progress synced' : 'Progress saved in this browser'}</div>
+            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in {currency} • {support.supportName} {support.phone} • {user ? (syncStatus === 'synced' ? 'Progress synced' : syncStatus === 'error' ? 'Progress sync paused' : 'Progress syncing') : 'Progress saved in this browser'}</div>
             <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • AUD $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • {money(moneySaved)} saved</span></div>
           </footer>
         </>
