@@ -34,3 +34,8 @@ Android packaging, Google Play Billing or an approved regional billing programme
 
 ## Quit-date sync correction
 The quit-smoking start date now has an independent edit revision and edit ID. Changing font/currency/accent on a stale device cannot overwrite a newer quit-date edit. Older in-flight cloud responses are merged with the latest local state before applying them. Legacy rows migrate without schema changes because the metadata is in the existing JSON state. Test phone date edit -> PC refresh -> PC refresh back to phone, and PC date edit -> mobile refresh. Concurrent offline date edits at the same revision resolve deterministically by edit ID (not a claim of globally ordered real-time edits).
+
+## Icon and locked-panel correction
+Restored the exact original installed lucide Wind paths and original 20px-in-36px header proportions; regenerated the favicon and home-screen PNGs with v3 cache-busting references. The Premium Analytics header tile, locked badge and central crown now share the selected accent colour and accent-tinted background. Re-add existing home-screen shortcuts if their cached icon does not update.
+
+Numeric input steppers now use accessible custom up/down buttons (44px touch targets), selected-accent arrows/backgrounds and matching keyboard ArrowUp/ArrowDown behaviour. Native OS spinners are hidden; decimal step/min/max handling is preserved. No data or account changes are involved in these appearance corrections.

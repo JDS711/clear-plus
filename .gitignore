@@ -5,4 +5,4 @@ dist/
 !.env.example
 
 # Recreated deterministically by scripts/generate-icons.mjs during build
-public/icons/*-v2.png
+public/icons/*-v*.png

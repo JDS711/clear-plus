@@ -906,7 +906,7 @@ export default function App() {
           {/* App Header */}
           <header className="app-header relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] backdrop-blur-2xl sticky top-0">
             <div className="flex items-center gap-4">
-              <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="w-9 h-9 rounded-[12px] overflow-hidden"><img src="/favicon.svg?v=2" alt="" className="w-full h-full" /></button>
+              <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="w-9 h-9 rounded-[12px] overflow-hidden"><img src="/favicon.svg?v=3" alt="" className="w-full h-full" /></button>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">Clear+</span>
@@ -961,8 +961,8 @@ export default function App() {
                   {/* Premium Analytics */}
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] overflow-hidden relative">
                     <div className="p-5 flex items-center justify-between">
-                      <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-[9px] bg-violet-500/15 border border-violet-500/20 flex items-center justify-center"><BarChart3 className="w-4 h-4 text-violet-300" /></div><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Premium Analytics</h2></div>
-                      {!isPremium && <span className="text-[10px] px-2 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-center gap-1"><Lock className="w-3 h-3" /> LOCKED</span>}
+                      <div className="flex items-center gap-2"><div data-premium-accent="analytics" className="app-accent-soft premium-accent-tile w-7 h-7 rounded-[9px] flex items-center justify-center"><BarChart3 className="app-accent-icon w-4 h-4" /></div><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Premium Analytics</h2></div>
+                      {!isPremium && <span data-premium-accent="locked" className="app-accent-soft premium-accent-tile text-[10px] px-2 py-1 rounded-full flex items-center gap-1"><Lock className="app-accent-icon w-3 h-3" /> LOCKED</span>}
                     </div>
                     <div className="relative">
                       <div className={`${!isPremium ? 'blur-[8px] pointer-events-none select-none' : ''} px-5 pb-5 space-y-5`}>
@@ -986,8 +986,8 @@ export default function App() {
                         </div>
                       </div>
                       {!isPremium && (
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#121214] via-[#121214]/80 to-transparent flex flex-col items-center justify-end p-6 text-center">
-                          <div className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center mb-3 shadow-[0_8px_24px_rgba(255,255,255,0.2)]"><Crown className="w-6 h-6" /></div>
+                        <div className="premium-locked-overlay absolute inset-0 flex flex-col items-center justify-end p-6 text-center">
+                          <div data-premium-accent="crown" className="app-accent-soft premium-accent-tile w-12 h-12 rounded-full flex items-center justify-center mb-3"><Crown className="app-accent-icon w-6 h-6" /></div>
                           <div className="text-[15px] font-bold tracking-[-0.01em]">Unlock Premium Analytics</div>
                           <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: {money(yearlyCost)} saved.</div>
                           <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with Clear+</button>
