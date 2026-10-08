@@ -1,7 +1,8 @@
 import { REGIONS, CURRENCIES, validRegion, validCurrency, formatMoney } from '../lib/regions.js';
 import Remodel from './Remodel';
 import EditableNumberInput from './EditableNumberInput';
-import { supabase } from './supabase';
+import { supabase, initialAuthLinkIssue } from './supabase';
+import { authLinkIssue } from './authLink';
 import useDeviceSessions from './useDeviceSessions';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { buildSavingsProjection } from '../lib/progress.js';
@@ -220,6 +221,7 @@ export default function App() {
   const [referral, setReferral] = useState<string>('');
   const { user, pendingUser, admission, error: deviceError, busy: deviceBusy, signOutDevice, retryAdmission, replaceDevice } = useDeviceSessions();
   const [authEmail, setAuthEmail] = useState('');
+  const [authLinkNotice, setAuthLinkNotice] = useState(initialAuthLinkIssue);
   const [authBusy, setAuthBusy] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
@@ -457,7 +459,11 @@ export default function App() {
   }, [user?.id]);
 
   useEffect(() => {
-    const onHashChange = () => setActiveTabState(tabFromHash());
+    const onHashChange = () => {
+      setActiveTabState(tabFromHash());
+      const issue = authLinkIssue(window.location.href);
+      if (issue) setAuthLinkNotice(issue);
+    };
     window.addEventListener('hashchange', onHashChange);
     if (!window.location.hash) {
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#dashboard`);
@@ -566,6 +572,7 @@ export default function App() {
   const openPaywall = (feature: string) => { setPaywallFeature(feature); setShowPaywall(true); };
   const sendSignInLink = async () => {
     const email = authEmail.trim();
+    setAuthLinkNotice('');
     if (!email) return;
     setAuthBusy(true);
     const { error } = await supabase.auth.signInWithOtp({
@@ -868,10 +875,10 @@ export default function App() {
       {showSuccessCelebration && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none">
           <div className="pointer-events-auto rounded-[28px] bg-[#121214] border border-emerald-500/30 p-8 text-center shadow-[0_30px_100px_rgba(0,0,0,0.9)] max-w-[420px] w-full">
-            <div className="w-16 h-16 rounded-full bg-emerald-500 text-black flex items-center justify-center mx-auto mb-4"><Crown className="w-8 h-8" /></div>
+            <div className="w-16 h-16 rounded-full bg-emerald-500 app-readable-text flex items-center justify-center mx-auto mb-4"><Crown className="w-8 h-8" /></div>
             <div className="text-[22px] font-[900]">You're now Clear+ 🎉</div>
             <div className="text-[13px] text-white/60 mt-2 leading-[1.5]">Premium unlocked. Unlimited SOS, analytics, progress tools. Thanks for supporting free quitters.</div>
-            <button onClick={() => setShowSuccessCelebration(false)} className="mt-5 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px]">Let's go</button>
+            <button onClick={() => setShowSuccessCelebration(false)} className="mt-5 h-11 px-6 rounded-full bg-white app-readable-text font-bold text-[13px]">Let's go</button>
           </div>
         </div>
       )}
@@ -907,7 +914,7 @@ export default function App() {
               {navItems.map(it => {
                 const active = activeTab === it.id;
                 return (
-                  <button key={it.id} onClick={() => setActiveTab(it.id)} className={`h-8 px-4 rounded-full text-[12px] font-medium flex items-center gap-1.5 transition ${active ? 'bg-white text-black shadow' : 'text-white/50 hover:text-white/80 hover:bg-white/[0.06]'}`}>
+                  <button key={it.id} onClick={() => setActiveTab(it.id)} className={`h-8 px-4 rounded-full text-[12px] font-medium flex items-center gap-1.5 transition ${active ? 'bg-white app-readable-text shadow' : 'text-white/50 hover:text-white/80 hover:bg-white/[0.06]'}`}>
                     <it.icon className="w-3.5 h-3.5" />{it.label}{!it.free && !isPremium && <Lock className="w-3 h-3 opacity-60" />}
                   </button>
                 );
@@ -932,7 +939,7 @@ export default function App() {
           {mobileNavOpen && (
             <div className="lg:hidden relative z-20 bg-[#0e0e10] border-b border-white/[0.06] px-4 py-3 flex gap-2 overflow-x-auto">
               {navItems.map(it => (
-                <button key={it.id} onClick={() => { setActiveTab(it.id); setMobileNavOpen(false); }} className={`shrink-0 h-9 px-4 rounded-full text-[13px] font-medium border flex items-center gap-1.5 ${activeTab === it.id ? 'bg-white text-black border-white' : 'bg-white/[0.04] border-white/[0.08] text-white/60'}`}>
+                <button key={it.id} onClick={() => { setActiveTab(it.id); setMobileNavOpen(false); }} className={`shrink-0 h-9 px-4 rounded-full text-[13px] font-medium border flex items-center gap-1.5 ${activeTab === it.id ? 'bg-white app-readable-text border-white' : 'bg-white/[0.04] border-white/[0.08] text-white/60'}`}>
                   <it.icon className="w-4 h-4" />{it.label}
                 </button>
               ))}
@@ -940,6 +947,8 @@ export default function App() {
           )}
 
           <main key={activeTab} className="tab-panel relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
+            {authLinkNotice && <div className="auth-link-notice" role="alert"><p>{authLinkNotice}</p><button type="button" onClick={() => { setAuthLinkNotice(''); setActiveTab('settings'); }} className="min-h-11 rounded-xl border px-4 mt-2">Go to sign-in settings</button></div>}
+
             {activeTab === 'dashboard' && <Remodel region={region} currency={currency} signedIn={!!user} quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('Clear+ Premium')} />}
             {activeTab === 'analytics' && (
                 <div className="lg:col-span-5 space-y-6">
@@ -975,7 +984,7 @@ export default function App() {
                           <div data-premium-accent="crown" className="app-accent-soft premium-accent-tile w-12 h-12 rounded-full flex items-center justify-center mb-3"><Crown className="app-accent-icon w-6 h-6" /></div>
                           <div className="text-[15px] font-bold tracking-[-0.01em]">Unlock Premium Analytics</div>
                           <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: {money(yearlyCost)} saved.</div>
-                          <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with Clear+</button>
+                          <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white app-readable-text font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with Clear+</button>
                         </div>
                       )}
                     </div>
@@ -1001,7 +1010,7 @@ export default function App() {
                 <div className="lg:col-span-7">
                   <div className="rounded-[28px] bg-[#131315] border border-white/[0.08] p-6 lg:p-8">
                     <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • 4-7-8</div><div className="text-[11px] text-white/40">{isPremium ? 'Premium • Unlimited guided sessions' : `${Math.max(0, FREE_GUIDED_SESSIONS - sosUses)} of ${FREE_GUIDED_SESSIONS} free guided sessions remaining today`} • Craving logs are always free</div></div></div>
+                      <div className="flex items-center gap-3"><div className="breathing-icon-tile app-accent-fill w-9 h-9 flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • 4-7-8</div><div className="text-[11px] text-white/40">{isPremium ? 'Premium • Unlimited guided sessions' : `${Math.max(0, FREE_GUIDED_SESSIONS - sosUses)} of ${FREE_GUIDED_SESSIONS} free guided sessions remaining today`} • Craving logs are always free</div></div></div>
                       {!isPremium && sosUses >= FREE_GUIDED_SESSIONS && !breathSessionActive && <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300">Guided limit reached</span>}
                     </div>
                     <div className="flex flex-col items-center text-center py-6">
@@ -1010,13 +1019,13 @@ export default function App() {
                       <div className="relative w-[260px] h-[260px] flex items-center justify-center mt-8">
                         <div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} />
                         <div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} />
-                        <div className="relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div>
+                        <div className="breath-orb-copy relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div>
                       </div>
                       <div className="mt-8 flex items-center gap-3">
                         <button onClick={toggleBreathing} className="app-accent-fill h-12 px-6 rounded-full font-bold text-[13px] flex items-center gap-2">
                           {breathRunning ? <><Pause className="w-4 h-4" /> Pause</> : <><Play className="w-4 h-4" /> Start breathing</>}
                         </button>
-                        <button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button>
+                        <button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} type="button" className="breathing-reset app-accent-fill h-12 flex items-center justify-center gap-2"><RotateCcw className="w-4 h-4" /> Reset</button>
                       </div>
                     </div>
                     <div className="mt-6">
@@ -1047,15 +1056,15 @@ export default function App() {
                 <div className="lg:col-span-7">
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <div className="flex items-center justify-between mb-5"><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Journal • Reflect & Grow</h2><span className="text-[11px] text-white/30">{journals.length} entries</span></div>
-                    <div className="flex gap-2 mb-4">{(['great', 'ok', 'tough'] as const).map(m => (<button key={m} onClick={() => setJournalMood(m)} className={`flex-1 h-9 rounded-full text-[11px] font-medium border capitalize transition ${journalMood === m ? 'bg-white text-black border-white' : 'bg-white/[0.04] border-white/[0.06] text-white/50 hover:text-white/80'}`}>{m}</button>))}</div>
+                    <div className="flex gap-2 mb-4">{(['great', 'ok', 'tough'] as const).map(m => (<button key={m} onClick={() => setJournalMood(m)} className={`flex-1 h-9 rounded-full text-[11px] font-medium border capitalize transition ${journalMood === m ? 'bg-white app-readable-text border-white' : 'bg-white/[0.04] border-white/[0.06] text-white/50 hover:text-white/80'}`}>{m}</button>))}</div>
                     <div className="flex gap-2 mb-6">
                       <input value={journalText} onChange={e => setJournalText(e.target.value)} onKeyDown={e => e.key === 'Enter' && addJournal()} placeholder="How are you feeling today?" className="flex-1 h-12 px-4 rounded-[14px] bg-white/[0.06] border border-white/[0.08] text-[13px] placeholder:text-white/30 focus:outline-none focus:border-white/20" />
-                      <button onClick={addJournal} className="w-12 h-12 rounded-[14px] bg-white text-black flex items-center justify-center hover:bg-white/90"><Plus className="w-5 h-5" /></button>
+                      <button onClick={addJournal} className="w-12 h-12 rounded-[14px] bg-white app-readable-text flex items-center justify-center hover:bg-white/90"><Plus className="w-5 h-5" /></button>
                     </div>
                     <div className="space-y-3 max-h-[520px] overflow-auto pr-1">
                       {journals.map(j => (
                         <div key={j.id} className="p-4 rounded-[14px] bg-white/[0.04] border border-white/[0.06]">
-                          <div className="flex items-center justify-between"><span className={`text-[10px] px-2 py-0.5 rounded-full border font-bold tracking-wide uppercase ${j.mood === 'great' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/20' : j.mood === 'ok' ? 'bg-white/[0.06] text-white/50 border-white/[0.08]' : 'bg-amber-500/10 text-amber-300 border-amber-500/20'}`}>{j.mood}</span><span className="text-[10px] text-white/30">{new Date(j.date).toLocaleDateString()}</span></div>
+                          <div className="flex items-center justify-between"><span className="journal-mood-label text-[10px] px-2 py-0.5 rounded-full border font-bold tracking-wide uppercase">{j.mood}</span><span className="text-[10px] text-white/30">{new Date(j.date).toLocaleDateString()}</span></div>
                           <div className="text-[13px] leading-[1.5] text-white/70 mt-2">{j.text}</div>
                         </div>
                       ))}
@@ -1083,15 +1092,15 @@ export default function App() {
                     <div className="relative p-6 lg:p-7">
                       <div className="flex items-center justify-between mb-6">
                         <div className="flex items-center gap-3"><div className="app-accent-soft w-8 h-8 rounded-[10px] flex items-center justify-center"><PiggyBank className="piggy-accent w-4 h-4" /></div><div><h2 className="text-[14px] font-bold">Pledge Jar • Your Savings, Visualized</h2><div className="text-[11px] text-white/40">Fill it with what you don't smoke.</div></div></div>
-                        <button onClick={() => { setShareType('money'); setShowShare(true); }} className="h-9 px-4 rounded-full bg-white text-black text-[12px] font-bold flex items-center gap-1.5"><Share2 className="w-4 h-4" /> Share</button>
+                        <button onClick={() => { setShareType('money'); setShowShare(true); }} className="h-9 px-4 rounded-full bg-white app-readable-text text-[12px] font-bold flex items-center gap-1.5"><Share2 className="w-4 h-4" /> Share</button>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-6 items-end">
                         <div className="flex justify-center">
                           <div className="relative w-[160px] h-[220px] rounded-b-[28px] rounded-t-[12px] border-[3px] border-white/[0.12] bg-white/[0.03] overflow-hidden">
                             <div className="absolute top-0 left-0 right-0 h-[18px] bg-white/[0.08] border-b border-white/[0.10] flex items-center justify-center"><div className="w-10 h-1.5 rounded-full bg-white/20" /></div>
                             <div className="pledge-fill absolute bottom-0 left-0 right-0 transition-all duration-1000 flex items-end justify-center pb-2" style={{ height: `${Math.min(95, (moneySaved / (yearlyCost || 1)) * 100)}%` }}>
-                              <span className="relative text-[10px] font-bold text-black/70">{money(moneySaved)}</span>
                             </div>
+                            <span className="pledge-value absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] font-bold">{money(moneySaved)}</span>
                           </div>
                         </div>
                         <div className="space-y-4">
@@ -1099,7 +1108,7 @@ export default function App() {
                             <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Estimated spending avoided</div><div className="text-[20px] font-[900] mt-1">{money(moneySaved)}</div></div>
                             <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Yearly goal</div><div className="text-[20px] font-[900] mt-1">{money(yearlyCost)}</div><div className="text-[11px] text-emerald-300">{Math.round((moneySaved / yearlyCost) * 100) || 0}% filled</div></div>
                           </div>
-                          <button onClick={reviewSavingsEstimate} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-white/90"><Gift className="w-4 h-4" /> Review savings estimate</button>
+                          <button onClick={reviewSavingsEstimate} className="w-full h-12 rounded-[14px] bg-white app-readable-text font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-white/90"><Gift className="w-4 h-4" /> Review savings estimate</button>
                         </div>
                       </div>
                     </div>
@@ -1109,7 +1118,7 @@ export default function App() {
                   <div className="rounded-[24px] bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/[0.08] p-6">
                     <div className="flex items-center gap-2 mb-3"><Crown className="app-accent-icon w-4 h-4" /><h3 className="text-[13px] font-bold">Share your progress</h3></div>
                     <div className="text-[12px] leading-[1.6] text-white/50">Share your win and inspire others. 1080x1080 image with website address to www.clear-plus.app. Created on your device.</div>
-                    <button onClick={() => { setShareType('money'); setShowShare(true); }} className="mt-4 w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Share2 className="w-4 h-4" /> Generate share image</button>
+                    <button onClick={() => { setShareType('money'); setShowShare(true); }} className="mt-4 w-full h-11 rounded-[12px] bg-white app-readable-text font-bold text-[13px] flex items-center justify-center gap-2"><Share2 className="w-4 h-4" /> Generate share image</button>
                   </div>
                 </div>
               </div>
@@ -1124,8 +1133,8 @@ export default function App() {
                       <div id="cost-assumptions" className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Country, currency & cost inputs</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                          <label>Country<select aria-label="Country" value={region} onChange={e => { const next = validRegion(e.target.value); setRegion(next); setCurrency(REGIONS[next].currency); }} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{Object.entries(REGIONS).map(([code, config]: [string, any]) => <option key={code} value={code}>{config.name}</option>)}</select></label>
-                          <label>Savings currency<select aria-label="Savings currency" value={currency} onChange={e => setCurrency(e.target.value)} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{CURRENCIES.map(code => <option key={code} value={code}>{code}</option>)}</select></label>
+                          <label>Country<select aria-label="Country" value={region} onChange={e => { const next = validRegion(e.target.value); setRegion(next); setCurrency(REGIONS[next].currency); }} className="block w-full min-h-11 rounded-xl p-2 app-readable-text bg-white">{Object.entries(REGIONS).map(([code, config]: [string, any]) => <option key={code} value={code}>{config.name}</option>)}</select></label>
+                          <label>Savings currency<select aria-label="Savings currency" value={currency} onChange={e => setCurrency(e.target.value)} className="block w-full min-h-11 rounded-xl p-2 app-readable-text bg-white">{CURRENCIES.map(code => <option key={code} value={code}>{code}</option>)}</select></label>
                         </div>
                         <p className="text-sm mb-3">Changing currency changes the label, not the numbers. Enter your actual local pack price below. Premium checkout remains priced in AUD.</p>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1133,7 +1142,7 @@ export default function App() {
                           <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / pack</label><EditableNumberInput aria-label="Cigarettes per pack" min={1} max={200} value={packSize} onValueChange={setPackSize} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
                           <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack {currency}</label><EditableNumberInput aria-label={`Price per pack ${currency}`} min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
                         </div>
-                        <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
+                        <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white app-readable-text border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
                         <p className="text-[11px] text-white/40 mt-2">Choose a common pack size or type an exact custom amount above.</p>
                       </div>
                       <div>
@@ -1208,7 +1217,7 @@ export default function App() {
                           </div>
                         </div>
                         <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices. Up to 3 devices or browsers can stay signed in at once.</p>
-                        <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Cloud className="w-4 h-4" /> Refresh this device from cloud</button>
+                        <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="cloud-sync-button app-accent-fill w-full h-11 rounded-[12px] text-[12px] font-bold flex items-center justify-center gap-2"><Cloud className="w-4 h-4" /> Refresh this device from cloud</button>
                         <button onClick={signOut} className="w-full h-11 rounded-[12px] bg-white/[0.05] border border-white/[0.10] text-[12px] font-bold flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> Sign out</button>
                       </div>
                     ) : pendingUser ? (
@@ -1230,7 +1239,7 @@ export default function App() {
                         <p className="text-[12px] leading-[1.55] text-white/50">Sign in with the same email on your phone and computer, and use the same app address on both. The preview and live app have separate browser storage. No extra password required.</p>
                         <label className="text-[10px] uppercase tracking-widest font-bold text-white/35 block">Email address</label>
                         <input type="email" autoComplete="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') sendSignInLink(); }} placeholder="you@example.com" className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" />
-                        <button disabled={authBusy || !authEmail.trim()} onClick={sendSignInLink} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 disabled:opacity-50"><Mail className="w-4 h-4" /> {authBusy ? 'Sending…' : 'Email me a sign-in link'}</button>
+                        <button disabled={authBusy || !authEmail.trim()} onClick={sendSignInLink} className="w-full h-11 rounded-[12px] bg-white app-readable-text font-bold text-[13px] flex items-center justify-center gap-2 disabled:opacity-50"><Mail className="w-4 h-4" /> {authBusy ? 'Sending…' : 'Email me a sign-in link'}</button>
                         <p className="text-[10px] text-white/35">Use the same email on every device. Request a fresh, single-use link on each device. Up to 3 devices or browsers can stay signed in at once.</p>
                       </div>
                     )}
@@ -1244,7 +1253,7 @@ export default function App() {
                     ) : (
                       <div className="space-y-3">
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Unlimited craving logs, timer, basic savings, 3 guided breathing sessions per day, 7-day history</div></div>
-                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to Clear+ from AUD $9.99/mo</button>
+                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white app-readable-text font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to Clear+ from AUD $9.99/mo</button>
                       </div>
                     )}
                   </div>
@@ -1256,7 +1265,7 @@ export default function App() {
                         if (deferredPrompt) { const dp = deferredPrompt; dp.prompt(); dp.userChoice.then((c: any) => { if (c.outcome === 'accepted') setIsInstalled(true); setDeferredPrompt(null); }); }
                         else setShowInstallHelp(true);
                       }} className="flex-1 h-10 rounded-[10px] bg-white/[0.08] border border-white/[0.10] text-[12px] font-medium flex items-center justify-center gap-2"><Download className="w-4 h-4" /> {isInstalled ? 'Installed ✓' : 'Install App'}</button>
-                      <button onClick={() => pushToast({ title: 'PWA', body: 'Add to Home Screen via browser menu.' })} className="h-10 px-3 rounded-[10px] bg-white/[0.04] border border-white/[0.06] text-[11px] text-white/50">Help</button>
+                      <button onClick={() => setShowInstallHelp(true)} className="h-10 px-3 rounded-[10px] bg-white/[0.04] border border-white/[0.06] text-[11px] text-white/50">Help</button>
                     </div>
                   </div>
                 </div>
@@ -1280,13 +1289,13 @@ export default function App() {
           <div className="relative w-full sm:max-w-[520px] rounded-t-[28px] sm:rounded-[28px] bg-[#121214] border border-white/[0.12] shadow-[0_30px_100px_rgba(0,0,0,0.9)] overflow-hidden flex flex-col max-h-[94vh]">
             <div className="p-6 overflow-auto">
               <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-[12px] bg-white text-black flex items-center justify-center"><Share2 className="w-5 h-5" /></div><div><div className="text-[16px] font-bold">Share Your Win</div><div className="text-[11px] text-white/40">Preview your progress image before sharing</div></div></div>
+                <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-[12px] bg-white app-readable-text flex items-center justify-center"><Share2 className="w-5 h-5" /></div><div><div className="text-[16px] font-bold">Share Your Win</div><div className="text-[11px] text-white/40">Preview your progress image before sharing</div></div></div>
                 <button onClick={() => setShowShare(false)} className="w-9 h-9 rounded-full bg-white/[0.06] border border-white/[0.08] flex items-center justify-center"><X className="w-4 h-4" /></button>
               </div>
 
               <div className="flex gap-2 mb-4">
-                <button onClick={() => setShareType('money')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'money' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>💰 {money(moneySaved)} Saved</button>
-                <button onClick={() => setShareType('days')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'days' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>📅 {days} Days Free</button>
+                <button onClick={() => setShareType('money')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'money' ? 'bg-white app-readable-text border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>💰 {money(moneySaved)} Saved</button>
+                <button onClick={() => setShareType('days')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'days' ? 'bg-white app-readable-text border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>📅 {days} Days Free</button>
               </div>
 
               <div className="rounded-[20px] bg-[#0f0f10] border border-white/[0.08] p-3 flex justify-center overflow-hidden">
@@ -1299,7 +1308,7 @@ export default function App() {
                   const url = c.toDataURL('image/png');
                   const a = document.createElement('a'); a.href = url; a.download = `clear-win-${shareType}-${days}d.png`; a.click();
                   pushToast({ title: 'Image downloaded', body: '1080x1080 PNG saved. Share it!' });
-                }} className="h-12 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Download className="w-4 h-4" /> Download PNG</button>
+                }} className="h-12 rounded-[12px] bg-white app-readable-text font-bold text-[13px] flex items-center justify-center gap-2"><Download className="w-4 h-4" /> Download PNG</button>
                 <button onClick={async () => {
                   const c = canvasRef.current; if (!c) return;
                   try {
@@ -1348,11 +1357,11 @@ export default function App() {
       {showSOSFull && activeTab !== 'sos' && mode === 'app' && (
         <div className="fixed inset-0 z-[60] flex flex-col bg-[#08080a]">
           <div className="sos-accent-wash absolute inset-0" />
-          <div className="relative z-10 flex items-center justify-between p-6"><div className="flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[13px] font-bold">Breathing exercise</div><div className="text-[11px] text-white/40">4-7-8 • Craving will pass</div></div></div><button onClick={() => { setShowSOSFull(false); setBreathRunning(false); }} className="w-10 h-10 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><X className="w-5 h-5" /></button></div>
+          <div className="relative z-10 flex items-center justify-between p-6"><div className="flex items-center gap-3"><div className="breathing-icon-tile app-accent-fill w-9 h-9 flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[13px] font-bold">Breathing exercise</div><div className="text-[11px] text-white/40">4-7-8 • Craving will pass</div></div></div><button onClick={() => { setShowSOSFull(false); setBreathRunning(false); }} className="w-10 h-10 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><X className="w-5 h-5" /></button></div>
           <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-8 text-center">
             <div className="mb-8"><div className="text-[11px] tracking-[0.2em] uppercase font-bold text-white/30">Round {breathCount + 1} • {breathPhase}</div><div className="mt-2 text-[28px] font-[800] capitalize">{breathPhase === 'inhale' ? 'Breathe in slowly' : breathPhase === 'hold' ? 'Hold' : breathPhase === 'exhale' ? 'Breathe out fully' : 'Rest'}</div></div>
-            <div className="relative w-[260px] h-[260px] flex items-center justify-center"><div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} /><div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} /><div className="relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div></div>
-            <div className="mt-10 flex items-center gap-3"><button onClick={toggleBreathing} className="app-accent-fill h-12 px-6 rounded-full font-bold text-[13px] flex items-center gap-2"><Play className="w-4 h-4" />{breathRunning ? 'Pause' : 'Start'}</button><button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} className="h-12 w-12 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><RotateCcw className="w-4 h-4" /></button></div>
+            <div className="relative w-[260px] h-[260px] flex items-center justify-center"><div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} /><div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} /><div className="breath-orb-copy relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div></div>
+            <div className="mt-10 flex items-center gap-3"><button onClick={toggleBreathing} className="app-accent-fill h-12 px-6 rounded-full font-bold text-[13px] flex items-center gap-2"><Play className="w-4 h-4" />{breathRunning ? 'Pause' : 'Start'}</button><button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} type="button" className="breathing-reset app-accent-fill h-12 flex items-center justify-center gap-2"><RotateCcw className="w-4 h-4" /> Reset</button></div>
           </div>
           <div className="relative z-10 p-6 flex gap-3"><button onClick={beatCurrentCraving} className="app-accent-fill flex-1 h-12 rounded-full font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button><button onClick={() => { setShowSOSFull(false); resetBreathing(); }} className="h-12 px-6 rounded-full bg-white/[0.08] border border-white/[0.10] text-[13px]">Close</button></div>
         </div>
@@ -1365,14 +1374,14 @@ export default function App() {
           <div className="relative w-full sm:max-w-[400px] rounded-t-[24px] sm:rounded-[24px] bg-[#161618] border border-white/[0.10] p-6">
             <div className="flex items-center justify-between mb-5"><h3 className="font-bold">{cravingLogOutcome === 'beaten' ? 'Log the craving you beat' : 'Log craving'}</h3><button onClick={() => { setShowCravingForm(false); setCravingLogOutcome('logged'); }} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
             <div className="space-y-4">
-              <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Trigger</label><div className="grid grid-cols-3 gap-2">{['Stress', 'Coffee', 'After meal', 'Boredom', 'Social', 'Driving'].map(t => (<button key={t} onClick={() => setCravingTrigger(t)} className={`h-9 rounded-full text-[11px] font-medium border transition ${cravingTrigger === t ? 'bg-white text-black border-white' : 'bg-white/[0.05] border-white/[0.08] text-white/60'}`}>{t}</button>))}</div></div>
+              <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Trigger</label><div className="grid grid-cols-3 gap-2">{['Stress', 'Coffee', 'After meal', 'Boredom', 'Social', 'Driving'].map(t => (<button key={t} onClick={() => setCravingTrigger(t)} className={`h-9 rounded-full text-[11px] font-medium border transition ${cravingTrigger === t ? 'bg-white app-readable-text border-white' : 'bg-white/[0.05] border-white/[0.08] text-white/60'}`}>{t}</button>))}</div></div>
               <div className="rounded-[16px] bg-white/[0.04] border border-white/[0.08] p-4">
                 <div className="flex items-center justify-between mb-4"><label htmlFor="craving-intensity" className="text-[11px] uppercase tracking-widest font-bold text-white/40">Intensity</label><strong className="app-accent-soft min-w-14 h-8 px-2 rounded-full flex items-center justify-center text-[13px]">{cravingIntensity}/10</strong></div>
                 <input id="craving-intensity" aria-label="Craving intensity" type="range" min={1} max={10} value={cravingIntensity} onChange={e => setCravingIntensity(parseInt(e.target.value))} className="craving-intensity w-full" style={{ background: `linear-gradient(to right, var(--theme-accent) 0%, var(--theme-accent) ${((cravingIntensity - 1) / 9) * 100}%, var(--theme-soft) ${((cravingIntensity - 1) / 9) * 100}%, var(--theme-soft) 100%)` }} />
                 <div className="mt-3 flex justify-between text-[10px] text-white/35"><span>1 • Mild</span><span>10 • Intense</span></div>
               </div>
               <div><label className="text-[11px] uppercase tracking-widest font-bold text-white/30 mb-2 block">Note (optional)</label><input value={cravingNote} onChange={e => setCravingNote(e.target.value)} placeholder="What helped?" className="w-full h-11 px-4 rounded-[12px] bg-white/[0.06] border border-white/[0.10] text-[13px] placeholder:text-white/30 focus:outline-none" /></div>
-              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> {cravingLogOutcome === 'beaten' ? 'Save as beaten' : 'Save craving'}</button>
+              <button onClick={addCraving} className="w-full h-12 rounded-[14px] bg-white app-readable-text font-bold text-[13px] flex items-center justify-center gap-2"><Wind className="w-4 h-4" /> {cravingLogOutcome === 'beaten' ? 'Save as beaten' : 'Save craving'}</button>
             </div>
           </div>
         </div>
@@ -1385,7 +1394,8 @@ export default function App() {
             <div className="flex items-center justify-between mb-5"><h3 className="font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Install Clear+</h3><button onClick={() => setShowInstallHelp(false)} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
             <div className="space-y-4 text-[13px] leading-[1.6] text-white/70">
               <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="font-bold text-white mb-2">How to install:</div><ul className="space-y-2 text-[12px]"><li><span className="text-white font-medium">Chrome / Edge:</span> Address bar → Install icon or Menu → Install app.</li><li><span className="text-white font-medium">Android:</span> ⋮ → Add to Home screen.</li><li><span className="text-white font-medium">iOS Safari:</span> Share → Add to Home Screen.</li></ul></div>
-              <button onClick={() => setShowInstallHelp(false)} className="w-full h-11 rounded-[12px] bg-white text-black font-bold">Got it</button>
+              <p className="text-[12px]">If an existing shortcut still shows the old C or green icon, first confirm your progress is synced, then remove that shortcut and install Clear+ again from www.clear-plus.app. Do not clear your browser data.</p>
+              <button onClick={() => setShowInstallHelp(false)} className="w-full h-11 rounded-[12px] bg-white app-readable-text font-bold">Got it</button>
             </div>
           </div>
         </div>

@@ -54,3 +54,11 @@ Latest branding choice supersedes earlier accent-linked branding: fixed bright b
 - After production serves the new `public/release.json` marker, enable with `update public.app_security_settings set enforce_device_limit = true where id;`.
 - Rollback order: first set `enforce_device_limit = false`, then revert the web release. Keep the new tables/policy in place with enforcement off; do not drop user data.
 - Original production commit for rollback: `33eee17c5deece6c4b8271fdb6de0f405da00e4f`.
+
+## Follow-up: consistent accents and sign-in feedback
+- Customer confirmed real bidirectional quit-date syncing works automatically. The cloud merge/store/admission code is unchanged in this follow-up; no database migration is needed.
+- All named copy/controls use accent-family ink instead of black text utilities. Primary breathing/reset/sync actions use white labels with tested contrast; reset is labelled and rectangular, SOS smoke has an accent tile, journal mood labels are uniform, and selected colour uses a thin border (keyboard focus remains visible).
+- Recovery timeline captions and note/story lines track the selected accent in both modes. Jar amounts have a readable surface label independent of jar fill height.
+- Supabase already enforces single-use magic links. An expired/reused link is now explicitly reported even when a browser already has a valid session; the app does not claim the failed link created a new sign-in. Same-tab hash navigation also shows the warning. No provider-supplied descriptions or tokens are echoed.
+- The apex live domain redirects to www to avoid separate origin storage. Root HTML/manifest revalidate to reduce stale-build confusion. Authentication and existing three-session admission are unchanged.
+- A matching Windows ICO is generated from the original fixed-blue/white-smoke PNG; Android/iOS/manifest assets remain identical. Existing OS shortcuts may cache old icons and require reinstalling the shortcut after checking sync. Do not clear browser data.

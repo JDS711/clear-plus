@@ -1,3 +1,5 @@
+import { initialAuthLinkIssue } from './authLink';
+export { initialAuthLinkIssue };
 import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_PUBLISHABLE_KEY } from '../lib/supabase-config.js';
 
