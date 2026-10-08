@@ -114,3 +114,7 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 .clear-shell .remodel .journey{background:var(--theme-action)}
 .clear-shell .breath-orb{background:linear-gradient(135deg,var(--theme-action),color-mix(in srgb,var(--theme-action),#000 18%))}
 .clear-shell[data-display-mode] .remodel .new-note,.clear-shell[data-display-mode] .new-story blockquote{border-left-color:var(--theme-accent)}
+
+/* Journal metadata wraps cleanly; LIVE is a steady timer highlight, not a pulse. */
+.journal-timestamp{line-height:1.45;text-align:right}
+.live-progress-dot{animation:none;opacity:1}
