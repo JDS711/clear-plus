@@ -897,20 +897,20 @@ export default function App() {
         <>
           {/* App Header */}
           <header className="app-header relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] backdrop-blur-2xl sticky top-0">
-            <div className="flex items-center gap-4">
+            <div className="app-header-brand flex items-center gap-4 shrink-0">
               <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="app-brand-tile w-9 h-9 rounded-[12px] flex items-center justify-center"><Wind aria-hidden="true" className="w-5 h-5" /></button>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">Clear+</span>
+                  <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none whitespace-nowrap">Clear+</span>
 
                   {isPremium && <span className="app-accent-soft hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"><Crown className="w-3 h-3" /> PLUS</span>}
-                  <button onClick={() => { setActiveTab('dashboard') }} className="hidden sm:flex text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40 hover:text-white/70">Home</button>
+                  <button onClick={() => { setActiveTab('dashboard') }} className="hidden 2xl:flex text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40 hover:text-white/70">Home</button>
                 </div>
-                <div className="text-[11px] text-white/40 mt-0.5 hidden sm:block tracking-wide">By a former smoker, for future non-smokers</div>
+                <div className="text-[11px] text-white/40 mt-0.5 hidden 2xl:block tracking-wide whitespace-nowrap">By a former smoker, for future non-smokers</div>
               </div>
             </div>
 
-            <div className="hidden lg:flex items-center gap-1 p-1 rounded-full bg-white/[0.04] border border-white/[0.06]">
+            <div className="app-header-navigation hidden xl:flex items-center gap-1 p-1 rounded-full bg-white/[0.04] border border-white/[0.06]">
               {navItems.map(it => {
                 const active = activeTab === it.id;
                 return (
@@ -932,12 +932,12 @@ export default function App() {
               ) : (
                 <div className="app-accent-soft h-9 px-3 rounded-full flex items-center gap-1.5 text-[11px]"><Crown className="w-3.5 h-3.5" /> Premium</div>
               )}
-              <button onClick={() => setMobileNavOpen(!mobileNavOpen)} className="lg:hidden w-9 h-9 rounded-full bg-white/[0.06] border border-white/[0.08] flex items-center justify-center"><Menu className="w-4 h-4" /></button>
+              <button onClick={() => setMobileNavOpen(!mobileNavOpen)} className="xl:hidden w-9 h-9 rounded-full bg-white/[0.06] border border-white/[0.08] flex items-center justify-center"><Menu className="w-4 h-4" /></button>
             </div>
           </header>
 
           {mobileNavOpen && (
-            <div className="lg:hidden relative z-20 bg-[#0e0e10] border-b border-white/[0.06] px-4 py-3 flex gap-2 overflow-x-auto">
+            <div className="xl:hidden relative z-20 bg-[#0e0e10] border-b border-white/[0.06] px-4 py-3 flex gap-2 overflow-x-auto">
               {navItems.map(it => (
                 <button key={it.id} onClick={() => { setActiveTab(it.id); setMobileNavOpen(false); }} className={`shrink-0 h-9 px-4 rounded-full text-[13px] font-medium border flex items-center gap-1.5 ${activeTab === it.id ? 'bg-white app-readable-text border-white' : 'bg-white/[0.04] border-white/[0.08] text-white/60'}`}>
                   <it.icon className="w-4 h-4" />{it.label}

@@ -118,3 +118,9 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 /* Journal metadata wraps cleanly; LIVE is a steady timer highlight, not a pulse. */
 .journal-timestamp{line-height:1.45;text-align:right}
 .live-progress-dot{animation:none;opacity:1}
+
+/* Preserve icon aspect ratio and keep the header compact at laptop widths. */
+.clear-shell .app-header-brand{min-width:0}
+.clear-shell .app-header .app-brand-tile{flex:0 0 36px;width:36px;min-width:36px;height:36px;aspect-ratio:1}
+.clear-shell .app-header .app-brand-tile svg{flex:none;width:20px;height:20px;aspect-ratio:1}
+.clear-shell .app-header button{white-space:nowrap}

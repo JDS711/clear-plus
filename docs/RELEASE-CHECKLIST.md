@@ -69,3 +69,10 @@ Latest branding choice supersedes earlier accent-linked branding: fixed bright b
 - Craving-help disclosure retains the five-minute pause below the dashboard button. Down/up chevrons and aria-expanded/aria-controls reflect collapsed/expanded state; no rightward navigation arrow.
 - LIVE progress dot is a steady accent highlight, not an animation. Tooltip describes automatic progress-timer updates rather than server connectivity.
 - Cloud sync, authentication, three-device admission and payment behaviour are unchanged. No database migration.
+
+## Header proportions follow-up
+- Reproduced prior laptop issue: at 1024/1100px the brand tile was squeezed to 20px wide by 36px high, while the branding group wrapped to 86px inside a 68px header. At 1280px it also compressed and wrapped.
+- Brand tile now cannot flex-shrink and stays 36x36; original smoke stays 20x20. Full navigation waits until xl width; long subtitle/Home waits until 2xl. Menu covers narrower widths. Header height and selected fonts/accents remain unchanged.
+- Browser geometry checks passed 54 combinations: 9 widths (390–1920), 3 representative fonts (Segoe/Comic/Courier), standard/large text. No non-square tile/artwork, over-height groups, overlapping groups, tested horizontal overflow or page exceptions.
+- Windows taskbar/title-bar icons may still use an older installed shortcut cache. This layout patch cannot replace files on the customer's Windows PC. Matching public icon assets already exist; confirm app/browser identity before reinstalling its shortcut. Preserve synced progress and do not clear browser data.
+- No changes to cloud sync, account admission, billing, journal behaviour or icon artwork. No database migration.
