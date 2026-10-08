@@ -1,3 +1,4 @@
+import { formatJournalTimestamp, journalDateTime } from '../lib/journal-time.js';
 import { REGIONS, CURRENCIES, validRegion, validCurrency, formatMoney } from '../lib/regions.js';
 import Remodel from './Remodel';
 import EditableNumberInput from './EditableNumberInput';
@@ -697,7 +698,6 @@ export default function App() {
     setJournals(next);
     setJournalText('');
     pushToast({ title: 'Journal saved', body: user ? 'Saved and syncing to your account.' : 'Saved on this device.' });
-    setActiveTab('dashboard');
   };
 
   const handleCheckout = async (plan: 'monthly' | 'yearly' | 'lifetime') => {
@@ -922,8 +922,8 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-2 px-3 h-8 rounded-full bg-white/[0.06] border border-white/[0.08]">
-                <div className="app-accent-dot w-2 h-2 rounded-full animate-pulse" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
+              <div title="Your smoke-free timer updates automatically." className="hidden sm:flex items-center gap-2 px-3 h-8 rounded-full bg-white/[0.06] border border-white/[0.08]">
+                <div aria-hidden="true" className="app-accent-dot live-progress-dot w-2 h-2 rounded-full" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
               </div>
               {!isPremium ? (
                 <button onClick={() => openPaywall('Clear+ Premium')} className="app-accent-fill h-9 px-4 rounded-full text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition">
@@ -1059,12 +1059,12 @@ export default function App() {
                     <div className="flex gap-2 mb-4">{(['great', 'ok', 'tough'] as const).map(m => (<button key={m} onClick={() => setJournalMood(m)} className={`flex-1 h-9 rounded-full text-[11px] font-medium border capitalize transition ${journalMood === m ? 'bg-white app-readable-text border-white' : 'bg-white/[0.04] border-white/[0.06] text-white/50 hover:text-white/80'}`}>{m}</button>))}</div>
                     <div className="flex gap-2 mb-6">
                       <input value={journalText} onChange={e => setJournalText(e.target.value)} onKeyDown={e => e.key === 'Enter' && addJournal()} placeholder="How are you feeling today?" className="flex-1 h-12 px-4 rounded-[14px] bg-white/[0.06] border border-white/[0.08] text-[13px] placeholder:text-white/30 focus:outline-none focus:border-white/20" />
-                      <button onClick={addJournal} className="w-12 h-12 rounded-[14px] bg-white app-readable-text flex items-center justify-center hover:bg-white/90"><Plus className="w-5 h-5" /></button>
+                      <button type="button" aria-label="Add journal entry" onClick={addJournal} className="w-12 h-12 rounded-[14px] bg-white app-readable-text flex items-center justify-center hover:bg-white/90"><Plus className="w-5 h-5" /></button>
                     </div>
                     <div className="space-y-3 max-h-[520px] overflow-auto pr-1">
                       {journals.map(j => (
-                        <div key={j.id} className="p-4 rounded-[14px] bg-white/[0.04] border border-white/[0.06]">
-                          <div className="flex items-center justify-between"><span className="journal-mood-label text-[10px] px-2 py-0.5 rounded-full border font-bold tracking-wide uppercase">{j.mood}</span><span className="text-[10px] text-white/30">{new Date(j.date).toLocaleDateString()}</span></div>
+                        <div key={j.id} className="journal-entry p-4 rounded-[14px] bg-white/[0.04] border border-white/[0.06]">
+                          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1"><span className="journal-mood-label text-[10px] px-2 py-0.5 rounded-full border font-bold tracking-wide uppercase">{j.mood}</span><time dateTime={journalDateTime(j.date)} className="journal-timestamp text-[10px] text-white/30 tabular-nums">{formatJournalTimestamp(j.date)}</time></div>
                           <div className="text-[13px] leading-[1.5] text-white/70 mt-2">{j.text}</div>
                         </div>
                       ))}

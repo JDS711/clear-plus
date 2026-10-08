@@ -62,3 +62,10 @@ Latest branding choice supersedes earlier accent-linked branding: fixed bright b
 - Supabase already enforces single-use magic links. An expired/reused link is now explicitly reported even when a browser already has a valid session; the app does not claim the failed link created a new sign-in. Same-tab hash navigation also shows the warning. No provider-supplied descriptions or tokens are echoed.
 - The apex live domain redirects to www to avoid separate origin storage. Root HTML/manifest revalidate to reduce stale-build confusion. Authentication and existing three-session admission are unchanged.
 - A matching Windows ICO is generated from the original fixed-blue/white-smoke PNG; Android/iOS/manifest assets remain identical. Existing OS shortcuts may cache old icons and require reinstalling the shortcut after checking sync. Do not clear browser data.
+
+## Follow-up: journal stays open and controls match their behaviour
+- Saving a journal entry (Add or Enter) no longer navigates to Dashboard. The entry is saved, input clears, and the journal page stays open.
+- Journal metadata displays local weekday, numeric date, full month and time without a visible year; existing stored ISO timestamps are preserved. Semantic time elements retain the full instant for accessibility/machine reading. Header wraps on narrow/large-text screens.
+- Craving-help disclosure retains the five-minute pause below the dashboard button. Down/up chevrons and aria-expanded/aria-controls reflect collapsed/expanded state; no rightward navigation arrow.
+- LIVE progress dot is a steady accent highlight, not an animation. Tooltip describes automatic progress-timer updates rather than server connectivity.
+- Cloud sync, authentication, three-device admission and payment behaviour are unchanged. No database migration.
