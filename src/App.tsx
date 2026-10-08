@@ -9,6 +9,7 @@ import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } fro
 import { buildSavingsProjection } from '../lib/progress.js';
 import { reconcileCloudStates } from '../lib/cloud-sync.js';
 import { saveCloudState, syncErrorLabel } from '../lib/cloud-store.js';
+import { cloudStateKey, cloudStatesEqual } from '../lib/cloud-state-key.js';
 import './comic-font.css';
 import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
@@ -229,6 +230,7 @@ export default function App() {
   const [syncRequest, setSyncRequest] = useState(0);
   const [syncError, setSyncError] = useState('');
   const lastSyncedStateRef = useRef('');
+  const lastSyncedOwnerRef = useRef<string | null>(null);
   const [premiumSession, setPremiumSession] = useState(() => {
     try { return localStorage.getItem('clear_premium_session') || ''; } catch { return ''; }
   });
@@ -403,9 +405,11 @@ export default function App() {
   }, [user?.id, premiumSession]);
 
   useEffect(() => {
-    if (!user) { setCloudReady(false); setSyncStatus('local'); lastSyncedStateRef.current = ''; return; }
+    if (!user) { setCloudReady(false); setSyncStatus('local'); lastSyncedStateRef.current = ''; lastSyncedOwnerRef.current = null; return; }
     let cancelled = false;
-    setCloudReady(false); setSyncStatus('loading'); setSyncError('');
+    // Quiet background reads should not disable the refresh button or flash a loading state.
+    if (lastSyncedOwnerRef.current !== user.id || !cloudReady) { setCloudReady(false); setSyncStatus('loading'); }
+    setSyncError('');
     const loadCloudState = async () => {
       try {
         const { data, error } = await supabase.from('user_state').select('state').eq('user_id', user.id).maybeSingle();
@@ -413,14 +417,15 @@ export default function App() {
         if (error) { setSyncError(syncErrorLabel(error)); setSyncStatus('error'); return; }
         const remote = data?.state as Record<string, any> | undefined;
         const merged = reconcileCloudStates(latestCloudStateRef.current, remote || {});
-        const result = JSON.stringify(merged) === JSON.stringify(remote)
+        const result = cloudStatesEqual(merged, remote)
           ? { state: merged }
           : await saveCloudState(supabase, user.id, merged, { cancelled: () => cancelled });
         if (cancelled || result.cancelled) return;
         if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
-        lastSyncedStateRef.current = JSON.stringify(result.state);
+        lastSyncedStateRef.current = cloudStateKey(result.state);
+        lastSyncedOwnerRef.current = user.id;
         applyCloudState(result.state);
-        setCloudReady(true); setSyncStatus(JSON.stringify(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
+        setCloudReady(true); setSyncStatus(cloudStateKey(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
       } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     };
     loadCloudState();
@@ -428,7 +433,7 @@ export default function App() {
   }, [user?.id, syncRequest]);
 
   useEffect(() => {
-    if (!user || !cloudReady || JSON.stringify(cloudState) === lastSyncedStateRef.current) return;
+    if (!user || !cloudReady || lastSyncedOwnerRef.current !== user.id || cloudStateKey(cloudState) === lastSyncedStateRef.current) return;
     let cancelled = false;
     setSyncStatus('saving'); setSyncError('');
     const timer = window.setTimeout(async () => {
@@ -436,9 +441,10 @@ export default function App() {
         const result = await saveCloudState(supabase, user.id, latestCloudStateRef.current, { cancelled: () => cancelled });
         if (cancelled || result.cancelled) return;
         if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
-        lastSyncedStateRef.current = JSON.stringify(result.state);
-        if (JSON.stringify(result.state) !== JSON.stringify(latestCloudStateRef.current)) applyCloudState(result.state);
-        setSyncStatus(JSON.stringify(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
+        lastSyncedStateRef.current = cloudStateKey(result.state);
+        lastSyncedOwnerRef.current = user.id;
+        if (!cloudStatesEqual(result.state, latestCloudStateRef.current)) applyCloudState(result.state);
+        setSyncStatus(cloudStateKey(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
       } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     }, 650);
     return () => { cancelled = true; window.clearTimeout(timer); };
