@@ -10,3 +10,5 @@ public/icons/*-v*.png
 # Local dependency symlink and generated matching Windows favicons.
 node_modules
 public/icons/favicon-v*.ico
+
+public/favicon.ico
