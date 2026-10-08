@@ -41,19 +41,16 @@ Stripe price and product IDs are **not listed in this README**. They belong in e
 - Stripe redirects back to `/` with `?session_id=...`.
 - `GET /api/verify-checkout?session_id=...` asks Stripe directly whether that session is a real, still-current purchase, and returns `{ paid, billing }`.
 - Premium is granted **only** from that server answer. It is never read from or written to `localStorage`.
-- A cancelled or refunded subscription stops returning `paid: true`, so access is revoked on the next load.
+- Inactive subscriptions, refunded charges and disputes fail verification on the next check. Cancellation at period end preserves access while the subscription remains active.
 - Offline, or the server unreachable, leaves Premium off. The client fails closed rather than trusting local state.
 
 ## Restore access
 
-There is currently **no self-serve restore path**. Premium is tied to the browser that completed the purchase, so clearing browser data, switching device or switching browser loses access. That is a refund and chargeback risk.
+Sign in in Settings using the email on the Stripe receipt, then choose **Restore Premium purchase**. New purchases require sign-in and are bound server-side to that authenticated account. Existing purchases without account metadata can migrate by verified receipt-email control. Do not send payment-session links as an unauthenticated restore mechanism.
 
-Manual restore until this is built:
+This restore searches recent purchases only; older purchases may require manual support. Account restoration also depends on correct Supabase row-level security and configured sign-in redirect URLs.
 
-1. Find the customer in the Stripe Dashboard.
-2. Send them the `session_id` from their payment as a link — for example `https://www.clear-plus.app/?session_id=cs_live_...`.
-
-Their browser re-verifies that session with Stripe on load and re-grants Premium. A magic-link email flow is the next proper step.
+See [release checklist](docs/RELEASE-CHECKLIST.md) before deploying these changes. This branch requires preview payment/migration testing before production.
 
 ## Lifetime pricing — no cap is enforced
 
@@ -74,7 +71,7 @@ Note: the Stripe price nickname `lifetime_founder_100` reads like a cap and can 
 ## Known gaps
 
 - Price IDs remain hardcoded as fallbacks in `lib/prices.js`. Removing them requires confirming all three `STRIPE_*_PRICE_ID` variables are set in Vercel first, because a missing variable would otherwise break that plan's checkout and verification.
-- No restore path (above).
+- Restore is implemented, but legacy-email migration and deployed database access rules must be verified before release.
 - No `sitemap.xml` (below).
 
 ## SEO

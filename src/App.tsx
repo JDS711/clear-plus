@@ -1,3 +1,4 @@
+import { REGIONS, CURRENCIES, validRegion, validCurrency, formatMoney } from '../lib/regions.js';
 import Remodel from './Remodel';
 import EditableNumberInput from './EditableNumberInput';
 import { supabase } from './supabase';
@@ -79,6 +80,27 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('app');
 
   // === CORE STATE ===
+  const [region, setRegion] = useState(() => {
+    try { return validRegion(localStorage.getItem('clear_region')); } catch { return 'AU'; }
+  });
+  const [currency, setCurrency] = useState(() => {
+    try { return validCurrency(localStorage.getItem('clear_currency'), validRegion(localStorage.getItem('clear_region'))); } catch { return 'AUD'; }
+  });
+  const support = REGIONS[region];
+  const money = (value: number) => formatMoney(value, currency, region, 0);
+  const verifyPurchase = async (sessionId: string) => {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return { paid: false, needsSignIn: true, billing: undefined, temporary: false };
+    const response = await fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId), {
+      headers: { Authorization: 'Bearer ' + data.session.access_token },
+    });
+    if (response.status >= 500) return { paid: false, temporary: true, needsSignIn: false, billing: undefined };
+    return response.json();
+  };
+  useEffect(() => {
+    try { localStorage.setItem('clear_region', region); localStorage.setItem('clear_currency', currency); } catch {}
+  }, [region, currency]);
+
   const [quitDate, setQuitDate] = useState<Date | null>(() => {
     try {
       const stored = localStorage.getItem('clear_quitDate');
@@ -217,7 +239,9 @@ export default function App() {
 });
 
   const cloudState = useMemo(() => ({
-    version: 2,
+    version: 3,
+    region,
+    currency,
     quitDate: quitDate?.toISOString() || null,
     cigsPerDay,
     costPerPack,
@@ -231,9 +255,11 @@ export default function App() {
     displayMode,
     textSize,
     premiumSession: premiumSession || null,
-  }), [quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
+  }), [region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
 
   const applyCloudState = (state: Record<string, any>) => {
+    if (state.region) setRegion(validRegion(state.region));
+    if (state.currency) setCurrency(validCurrency(state.currency, state.region || region));
     const syncedQuitDate = state.quitDate ? new Date(state.quitDate) : null;
     if (!syncedQuitDate || Number.isFinite(syncedQuitDate.getTime())) setQuitDate(syncedQuitDate);
     if (Number.isFinite(state.cigsPerDay)) setCigsPerDay(Math.max(1, state.cigsPerDay));
@@ -326,6 +352,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    setIsPremium(false);
+    if (user && premiumSession) {
+      verifyPurchase(premiumSession).then(result => {
+        if (cancelled) return;
+        setIsPremium(!!result.paid);
+        if (result.paid && result.billing) setBilling(result.billing);
+      }).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [user?.id, premiumSession]);
+
+  useEffect(() => {
     if (!user) {
       setCloudReady(false);
       setSyncStatus('local');
@@ -362,12 +401,11 @@ export default function App() {
       }
 
       if (reconciled.premiumSession) {
-          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(reconciled.premiumSession))
-            .then(response => response.json())
+          verifyPurchase(reconciled.premiumSession)
             .then(result => {
               setIsPremium(!!result.paid);
               if (result.paid && result.billing) setBilling(result.billing);
-              if (!result.paid) setPremiumSession('');
+              if (!result.paid && !result.needsSignIn && !result.temporary) setPremiumSession('');
             })
             .catch(() => {});
       }
@@ -455,14 +493,17 @@ export default function App() {
       const sessionId = p.get('session_id');
 
       if (sessionId) {
+        setPremiumSession(sessionId);
+        p.delete('session_id');
+        window.history.replaceState(null, '', window.location.pathname + (p.toString() ? '?' + p.toString() : '') + window.location.hash);
         // Straight after payment. Verify with Stripe, then REMEMBER THE SESSION ID — that is the
         // credential every future load re-checks. No boolean is stored.
-        fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId)).then(r => r.json()).then(data => {
+        verifyPurchase(sessionId).then(data => {
           if (data.paid) {
             setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true);
             setPremiumSession(sessionId);
           } else {
-            pushToast({ title: 'Payment not confirmed', body: 'Please check your payment receipt.' });
+            pushToast({ title: data.needsSignIn ? 'Sign in to restore Premium' : 'Payment not confirmed', body: data.needsSignIn ? 'Use the email on your payment receipt in Settings.' : 'Please check your payment receipt and retry.' });
           }
         }).catch(() => pushToast({ title: 'Unable to verify payment', body: 'Keep your receipt and retry this page.' }));
       } else {
@@ -474,11 +515,11 @@ export default function App() {
         const storedSession = premiumSession;
 
         if (storedSession) {
-          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(storedSession)).then(r => r.json()).then(data => {
+          verifyPurchase(storedSession).then(data => {
             setIsPremium(!!data.paid);
             if (data.paid && data.billing) setBilling(data.billing);
             // Drop a credential Stripe no longer honours, so we stop re-checking a dead session.
-            if (!data.paid) setPremiumSession('');
+            if (!data.paid && !data.needsSignIn && !data.temporary) setPremiumSession('');
           }).catch(() => {
             // Offline, or the server is unreachable. Premium is deliberately left OFF rather than
             // trusting local state, because any local grant is forgeable. See the handover note.
@@ -542,11 +583,26 @@ export default function App() {
     pushToast({ title: 'Check your email', body: 'Open the Clear+ sign-in link on this device.' });
   };
   const signOut = async () => {
+    setIsPremium(false);
     await supabase.auth.signOut();
     setUser(null);
     setCloudReady(false);
     setSyncStatus('local');
     pushToast({ title: 'Signed out', body: 'Your local progress is still on this device.' });
+  };
+
+  const restorePremium = async () => {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) { pushToast({ title: 'Sign in first', body: 'Use the email on your Stripe receipt.' }); return; }
+    try {
+      const response = await fetch('/api/restore-access', { headers: { Authorization: 'Bearer ' + data.session.access_token } });
+      const result = await response.json();
+      if (!response.ok) throw new Error();
+      if (result.paid && result.sessionId) {
+        setPremiumSession(result.sessionId); setIsPremium(true); setBilling(result.billing);
+        pushToast({ title: 'Premium restored', body: 'Your purchase was verified with Stripe.' });
+      } else { pushToast({ title: 'No active purchase found', body: 'Check that you signed in with your purchase email. Older purchases may need support.' }); }
+    } catch { pushToast({ title: 'Restore unavailable', body: 'Your purchase has not been removed. Please try again later.' }); }
   };
 
   // === CALCS ===
@@ -569,10 +625,10 @@ export default function App() {
     { label: '24 hours', done: days >= 1, icon: '🔥' },
     { label: '3 days', done: days >= 3, icon: '🌿' },
     { label: '1 week', done: days >= 7, icon: '💪' },
-    { label: '$500 saved', done: moneySaved >= 500, icon: '💰' },
+    { label: `${money(500)} saved`, done: moneySaved >= 500, icon: '💰' },
     { label: '100 avoided', done: cigsAvoided >= 100, icon: '🚭' },
     { label: '5 cravings beaten', done: cravingsPassed >= 5, icon: '🏆' },
-    { label: '$1,000 saved', done: moneySaved >= 1000, icon: '🎯' },
+    { label: `${money(1000)} saved`, done: moneySaved >= 1000, icon: '🎯' },
     { label: '1 month', done: days >= 30, icon: '🌟' },
   ];
   const achievementsEarned = achievements.filter(achievement => achievement.done).length;
@@ -648,9 +704,12 @@ export default function App() {
       pushToast({ title: 'Plan unavailable', body: 'That plan is temporarily unavailable. The other plans are unaffected.' });
       return;
     }
+    if (!user) { setShowPaywall(false); setActiveTab('settings'); pushToast({ title: 'Sign in before upgrading', body: 'This links your purchase to your account so it can be restored.' }); return; }
     try {
+      const { data: auth } = await supabase.auth.getSession();
+      if (!auth.session) throw new Error('Sign in again');
       pushToast({ title: 'Opening secure checkout', body: 'Review your plan in Stripe before paying.' });
-      const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billing: plan, customerEmail: user?.email, userId: user?.id }) });
+      const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + auth.session.access_token }, body: JSON.stringify({ billing: plan }) });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error('Checkout is unavailable. Please try again later.');
       window.location.assign(data.url);
@@ -701,7 +760,7 @@ export default function App() {
     if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(W - 280, 48, 216, 36, 18); ctx.fill(); ctx.stroke(); } else { ctx.fillRect(W - 280, 48, 216, 36); }
     ctx.fillStyle = '#6EE7B7'; ctx.font = '700 13px Inter'; ctx.fillText('PERSONAL ESTIMATE', W - 264, 70);
     // main number
-    const mainText = shareType === 'money' ? `$${moneySaved.toFixed(0)}` : `${days} DAYS`;
+    const mainText = shareType === 'money' ? `${money(moneySaved)}` : `${days} DAYS`;
     const subText = shareType === 'money' ? 'Spending avoided' : 'Smoke-Free';
     ctx.fillStyle = 'white'; ctx.font = '900 168px Inter, sans-serif'; ctx.fillText(mainText, 64, 420);
     ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '700 64px Inter'; ctx.fillText(subText, 64, 500);
@@ -722,7 +781,7 @@ export default function App() {
     ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'italic 500 22px Inter'; ctx.fillText(`"${QUOTES[days % QUOTES.length]}"`, 64, 780);
     // footer text
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '700 18px Inter'; ctx.fillText('I quit with clear-plus1.0', 240, 920);
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '500 15px Inter'; ctx.fillText('www.clear-plus.app • Quitline 13 7848', 240, 948);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '500 15px Inter'; ctx.fillText(`www.clear-plus.app • ${support.phone || support.supportName}`, 240, 948);
     ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = '500 13px Inter'; ctx.fillText('Not medical advice. You got this.', 240, 972);
   };
 
@@ -885,7 +944,7 @@ export default function App() {
           )}
 
           <main key={activeTab} className="tab-panel relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
-            {activeTab === 'dashboard' && <Remodel quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
+            {activeTab === 'dashboard' && <Remodel region={region} currency={currency} signedIn={!!user} quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
             {activeTab === 'analytics' && (
                 <div className="lg:col-span-5 space-y-6">
                   {/* Premium Analytics */}
@@ -897,7 +956,7 @@ export default function App() {
                     <div className="relative">
                       <div className={`${!isPremium ? 'blur-[8px] pointer-events-none select-none' : ''} px-5 pb-5 space-y-5`}>
                         <div className="rounded-[16px] bg-[#0f0f10] border border-white/[0.06] p-4">
-                          <div className="flex items-center justify-between mb-3"><span className="text-[11px] font-bold tracking-widest uppercase text-white/30">Cumulative Savings</span><span className="text-[11px] text-emerald-300 font-bold">${moneySaved.toFixed(0)} total</span></div>
+                          <div className="flex items-center justify-between mb-3"><span className="text-[11px] font-bold tracking-widest uppercase text-white/30">Cumulative Savings</span><span className="text-[11px] text-emerald-300 font-bold">{money(moneySaved)} total</span></div>
                           <div className="h-[110px] w-full relative">
                             <svg viewBox="0 0 300 100" className="w-full h-full">
                               <defs><linearGradient id="g2" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--theme-accent)" stopOpacity="0.4" /><stop offset="100%" stopColor="var(--theme-accent)" stopOpacity="0" /></linearGradient></defs>
@@ -919,7 +978,7 @@ export default function App() {
                         <div className="absolute inset-0 bg-gradient-to-t from-[#121214] via-[#121214]/80 to-transparent flex flex-col items-center justify-end p-6 text-center">
                           <div className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center mb-3 shadow-[0_8px_24px_rgba(255,255,255,0.2)]"><Crown className="w-6 h-6" /></div>
                           <div className="text-[15px] font-bold tracking-[-0.01em]">Unlock Premium Analytics</div>
-                          <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: ${yearlyCost.toFixed(0)} saved.</div>
+                          <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: {money(yearlyCost)} saved.</div>
                           <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with clear-plus1.0</button>
                         </div>
                       )}
@@ -1035,14 +1094,14 @@ export default function App() {
                           <div className="relative w-[160px] h-[220px] rounded-b-[28px] rounded-t-[12px] border-[3px] border-white/[0.12] bg-white/[0.03] overflow-hidden">
                             <div className="absolute top-0 left-0 right-0 h-[18px] bg-white/[0.08] border-b border-white/[0.10] flex items-center justify-center"><div className="w-10 h-1.5 rounded-full bg-white/20" /></div>
                             <div className="pledge-fill absolute bottom-0 left-0 right-0 transition-all duration-1000 flex items-end justify-center pb-2" style={{ height: `${Math.min(95, (moneySaved / (yearlyCost || 1)) * 100)}%` }}>
-                              <span className="relative text-[10px] font-bold text-black/70">${moneySaved.toFixed(0)}</span>
+                              <span className="relative text-[10px] font-bold text-black/70">{money(moneySaved)}</span>
                             </div>
                           </div>
                         </div>
                         <div className="space-y-4">
                           <div className="grid grid-cols-2 gap-3">
-                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Estimated spending avoided</div><div className="text-[20px] font-[900] mt-1">${moneySaved.toFixed(2)}</div></div>
-                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Yearly goal</div><div className="text-[20px] font-[900] mt-1">${yearlyCost.toFixed(0)}</div><div className="text-[11px] text-emerald-300">{Math.round((moneySaved / yearlyCost) * 100) || 0}% filled</div></div>
+                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Estimated spending avoided</div><div className="text-[20px] font-[900] mt-1">{money(moneySaved)}</div></div>
+                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Yearly goal</div><div className="text-[20px] font-[900] mt-1">{money(yearlyCost)}</div><div className="text-[11px] text-emerald-300">{Math.round((moneySaved / yearlyCost) * 100) || 0}% filled</div></div>
                           </div>
                           <button onClick={reviewSavingsEstimate} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-white/90"><Gift className="w-4 h-4" /> Review savings estimate</button>
                         </div>
@@ -1128,11 +1187,16 @@ export default function App() {
                         </div>
                       </div>
                       <div id="cost-assumptions" className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
-                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Country, currency & cost inputs</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                          <label>Country<select aria-label="Country" value={region} onChange={e => { const next = validRegion(e.target.value); setRegion(next); setCurrency(REGIONS[next].currency); }} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{Object.entries(REGIONS).map(([code, config]: [string, any]) => <option key={code} value={code}>{config.name}</option>)}</select></label>
+                          <label>Savings currency<select aria-label="Savings currency" value={currency} onChange={e => setCurrency(e.target.value)} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{CURRENCIES.map(code => <option key={code} value={code}>{code}</option>)}</select></label>
+                        </div>
+                        <p className="text-sm mb-3">Changing currency changes the label, not the numbers. Enter your actual local pack price below. Premium checkout remains priced in AUD.</p>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / day</label><EditableNumberInput aria-label="Cigarettes per day" min={1} max={200} value={cigsPerDay} onValueChange={setCigsPerDay} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
                           <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / pack</label><EditableNumberInput aria-label="Cigarettes per pack" min={1} max={200} value={packSize} onValueChange={setPackSize} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack AUD</label><EditableNumberInput aria-label="Price per pack AUD" min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack {currency}</label><EditableNumberInput aria-label={`Price per pack ${currency}`} min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
                         </div>
                         <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
                         <p className="text-[11px] text-white/40 mt-2">Choose a common pack size or type an exact custom amount above.</p>
@@ -1144,6 +1208,9 @@ export default function App() {
                 <div className="lg:col-span-5 space-y-6">
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <div className="flex items-center gap-2 mb-4"><Cloud className="w-5 h-5 text-sky-300" /><h3 className="text-[14px] font-bold">Account & sync</h3></div>
+                  <button type="button" onClick={restorePremium} className="min-h-11 rounded-xl border p-3">Restore Premium purchase</button>
+                  <p className="text-sm">Sign in using the email on your Stripe receipt, then restore. Free tools do not require an account.</p>
+
                     {user ? (
                       <div className="space-y-4">
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4">
@@ -1176,7 +1243,7 @@ export default function App() {
                     ) : (
                       <div className="space-y-3">
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Unlimited craving logs, timer, basic savings, 3 guided breathing sessions per day, 7-day history</div></div>
-                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to clear-plus1.0 from $9.99/mo</button>
+                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to clear-plus1.0 from AUD $9.99/mo</button>
                       </div>
                     )}
                   </div>
@@ -1197,8 +1264,8 @@ export default function App() {
           </main>
 
           <footer className="relative z-10 border-t border-white/[0.06] mt-8 py-4 px-4 lg:px-7 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-white/25">
-            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in AUD • Quitline 13 7848 • {user ? 'Progress synced' : 'Progress saved in this browser'}</div>
-            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • ${moneySaved.toFixed(0)} saved</span></div>
+            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in {currency} • {support.supportName} {support.phone} • {user ? 'Progress synced' : 'Progress saved in this browser'}</div>
+            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • AUD $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • {money(moneySaved)} saved</span></div>
           </footer>
         </>
       )}
@@ -1217,7 +1284,7 @@ export default function App() {
               </div>
 
               <div className="flex gap-2 mb-4">
-                <button onClick={() => setShareType('money')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'money' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>💰 ${moneySaved.toFixed(0)} Saved</button>
+                <button onClick={() => setShareType('money')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'money' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>💰 {money(moneySaved)} Saved</button>
                 <button onClick={() => setShareType('days')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'days' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>📅 {days} Days Free</button>
               </div>
 
@@ -1241,10 +1308,10 @@ export default function App() {
                     // @ts-ignore
                     if (navigator.canShare && navigator.canShare({ files: [file] })) {
                       // @ts-ignore
-                      await navigator.share({ files: [file], title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is $${moneySaved.toFixed(0)} and quit for ${days} days with clear-plus1.0!` });
+                      await navigator.share({ files: [file], title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with clear-plus1.0!` });
                     } else if (navigator.share) {
                       // @ts-ignore
-                      await navigator.share({ title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is $${moneySaved.toFixed(0)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app` });
+                      await navigator.share({ title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app` });
                     } else {
                       const url = URL.createObjectURL(blob);
                       window.open(url, '_blank');
@@ -1258,7 +1325,7 @@ export default function App() {
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button onClick={() => {
-                  const text = `My estimated spending avoided is $${moneySaved.toFixed(0)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app`;
+                  const text = `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app`;
                   const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://www.clear-plus.app')}&quote=${encodeURIComponent(text)}`;
                   window.open(url, '_blank');
                 }} className="h-10 rounded-[10px] bg-[#1877F2]/15 border border-[#1877F2]/20 text-[#8AB4FF] text-[12px] font-semibold flex items-center justify-center gap-2"><Facebook className="w-4 h-4" /> Facebook</button>

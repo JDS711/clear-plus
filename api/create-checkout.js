@@ -1,3 +1,4 @@
+import { authenticatedUser } from '../lib/auth.js';
 import Stripe from 'stripe';
 import { prices, isKnownPlan } from '../lib/prices.js';
 import { PLAN_BILLING, isPriceIdShaped, redactKeyLike } from '../lib/plans.js';
@@ -19,12 +20,11 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const plan = req.body?.billing;
-  const customerEmail = typeof req.body?.customerEmail === 'string' && req.body.customerEmail.includes('@')
-    ? req.body.customerEmail.slice(0, 254)
-    : undefined;
-  const userId = typeof req.body?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(req.body.userId)
-    ? req.body.userId
-    : undefined;
+  let user;
+  try { user = await authenticatedUser(req); } catch { return res.status(503).json({ error: 'Sign-in verification unavailable' }); }
+  if (!user) return res.status(401).json({ error: 'Sign in before upgrading' });
+  const customerEmail = user.email;
+  const userId = user.id;
   if (!isKnownPlan(plan)) return res.status(400).json({ error: 'Invalid plan' });
   if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ error: 'Checkout temporarily unavailable' });
 
@@ -58,6 +58,7 @@ export default async function handler(req, res) {
       cancel_url: 'https://www.clear-plus.app/?canceled=true',
       allow_promotion_codes: true,
       customer_email: customerEmail,
+      ...(plan === 'lifetime' ? { customer_creation: 'always' } : {}),
       client_reference_id: userId,
       metadata: { billing_type: plan, ...(userId ? { supabase_user_id: userId } : {}) },
     });

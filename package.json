@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm test && vite build",
+    "build": "npm test && npm run typecheck && vite build",
     "preview": "vite preview",
-    "test": "node --test lib/*.test.js"
+    "test": "node --test lib/*.test.js",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
