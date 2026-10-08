@@ -109,6 +109,16 @@ export default function App() {
     try { localStorage.setItem('clear_region', region); localStorage.setItem('clear_currency', currency); } catch {}
   }, [region, currency]);
 
+  const [quitDateRevision, setQuitDateRevision] = useState(() => {
+    try { const value = Number(localStorage.getItem('clear_quitDateRevision')); return Number.isSafeInteger(value) && value >= 0 ? value : 0; } catch { return 0; }
+  });
+  const [quitDateEditId, setQuitDateEditId] = useState(() => {
+    try { return localStorage.getItem('clear_quitDateEditId') || ''; } catch { return ''; }
+  });
+  const latestCloudStateRef = useRef<Record<string, any>>({});
+  useEffect(() => {
+    try { localStorage.setItem('clear_quitDateRevision', String(quitDateRevision)); localStorage.setItem('clear_quitDateEditId', quitDateEditId); } catch {}
+  }, [quitDateRevision, quitDateEditId]);
   const [quitDate, setQuitDateRaw] = useState<Date | null>(() => {
     try {
       const stored = localStorage.getItem('clear_quitDate');
@@ -250,7 +260,14 @@ export default function App() {
 
   const setRegion = (value: string) => { markSettingsChanged(); setRegionRaw(value); };
   const setCurrency = (value: string) => { markSettingsChanged(); setCurrencyRaw(value); };
-  const setQuitDate = (value: Date | null) => { markSettingsChanged(); setQuitDateRaw(value); };
+  const setQuitDate = (value: Date | null) => {
+    if (value && !Number.isFinite(value.getTime())) return;
+    const revision = Math.max(quitDateRevision, Number(latestCloudStateRef.current.quitDateRevision) || 0) + 1;
+    const editId = crypto.randomUUID();
+    // Update the ref immediately: an older in-flight cloud response may finish before React re-renders.
+    latestCloudStateRef.current = { ...latestCloudStateRef.current, quitDate: value?.toISOString() || null, quitDateRevision: revision, quitDateEditId: editId };
+    markSettingsChanged(); setQuitDateRevision(revision); setQuitDateEditId(editId); setQuitDateRaw(value);
+  };
   const setCigsPerDay = (value: number) => { markSettingsChanged(); setCigsPerDayRaw(value); };
   const setCostPerPack = (value: number) => { markSettingsChanged(); setCostPerPackRaw(value); };
   const setPackSize = (value: number) => { markSettingsChanged(); setPackSizeRaw(value); };
@@ -260,7 +277,9 @@ export default function App() {
   const setTextSize = (value: TextSize) => { markSettingsChanged(); setTextSizeRaw(value); };
 
   const cloudState = useMemo(() => ({
-    version: 4,
+    version: 5,
+    quitDateRevision,
+    quitDateEditId,
     settingsUpdatedAt,
     region,
     currency,
@@ -277,9 +296,16 @@ export default function App() {
     displayMode,
     textSize,
     premiumSession: premiumSession || null,
-  }), [settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
+  }), [quitDateRevision, quitDateEditId, settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
 
-  const applyCloudState = (state: Record<string, any>) => {
+  latestCloudStateRef.current = cloudState;
+
+  const applyCloudState = (incoming: Record<string, any>) => {
+    // Keep edits made while the network request was in flight, rather than applying its stale snapshot.
+    const state = reconcileCloudStates(latestCloudStateRef.current, incoming);
+    latestCloudStateRef.current = state;
+    setQuitDateRevision(state.quitDateRevision);
+    setQuitDateEditId(state.quitDateEditId);
     setSettingsUpdatedAt(Number(state.settingsUpdatedAt) || 0);
     if (state.region) setRegionRaw(validRegion(state.region));
     if (state.currency) setCurrencyRaw(validCurrency(state.currency, state.region || region));
@@ -397,7 +423,7 @@ export default function App() {
         if (cancelled) return;
         if (error) { setSyncError(syncErrorLabel(error)); setSyncStatus('error'); return; }
         const remote = data?.state as Record<string, any> | undefined;
-        const merged = reconcileCloudStates(cloudState, remote || {});
+        const merged = reconcileCloudStates(latestCloudStateRef.current, remote || {});
         const result = JSON.stringify(merged) === JSON.stringify(remote)
           ? { state: merged }
           : await saveCloudState(supabase, user.id, merged, { cancelled: () => cancelled });
@@ -405,7 +431,7 @@ export default function App() {
         if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
         lastSyncedStateRef.current = JSON.stringify(result.state);
         applyCloudState(result.state);
-        setCloudReady(true); setSyncStatus('synced');
+        setCloudReady(true); setSyncStatus(JSON.stringify(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
       } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     };
     loadCloudState();
@@ -418,12 +444,12 @@ export default function App() {
     setSyncStatus('saving'); setSyncError('');
     const timer = window.setTimeout(async () => {
       try {
-        const result = await saveCloudState(supabase, user.id, cloudState, { cancelled: () => cancelled });
+        const result = await saveCloudState(supabase, user.id, latestCloudStateRef.current, { cancelled: () => cancelled });
         if (cancelled || result.cancelled) return;
         if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
         lastSyncedStateRef.current = JSON.stringify(result.state);
-        if (JSON.stringify(result.state) !== JSON.stringify(cloudState)) applyCloudState(result.state);
-        setSyncStatus('synced');
+        if (JSON.stringify(result.state) !== JSON.stringify(latestCloudStateRef.current)) applyCloudState(result.state);
+        setSyncStatus(JSON.stringify(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
       } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     }, 650);
     return () => { cancelled = true; window.clearTimeout(timer); };
@@ -736,7 +762,7 @@ export default function App() {
     for (let i = 0; i < W; i += 54) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, H); ctx.stroke(); }
     for (let i = 0; i < H; i += 54) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(W, i); ctx.stroke(); }
     // header
-    ctx.fillStyle = 'white'; ctx.font = '900 36px Inter, sans-serif'; ctx.fillText('clear-plus1.0', 64, 88);
+    ctx.fillStyle = 'white'; ctx.font = '900 36px Inter, sans-serif'; ctx.fillText('Clear+', 64, 88);
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '800 22px Inter, sans-serif'; ctx.fillText('', 168, 84);
     ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '600 14px Inter, sans-serif'; ctx.fillText('BY A FORMER SMOKER, FOR FUTURE NON-SMOKERS', 64, 120);
     // pill
@@ -765,7 +791,7 @@ export default function App() {
     // quote
     ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'italic 500 22px Inter'; ctx.fillText(`"${QUOTES[days % QUOTES.length]}"`, 64, 780);
     // footer text
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '700 18px Inter'; ctx.fillText('I quit with clear-plus1.0', 240, 920);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '700 18px Inter'; ctx.fillText('I quit with Clear+', 240, 920);
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '500 15px Inter'; ctx.fillText(`www.clear-plus.app • ${support.phone || support.supportName}`, 240, 948);
     ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = '500 13px Inter'; ctx.fillText('Not medical advice. You got this.', 240, 972);
   };
@@ -858,7 +884,7 @@ export default function App() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none">
           <div className="pointer-events-auto rounded-[28px] bg-[#121214] border border-emerald-500/30 p-8 text-center shadow-[0_30px_100px_rgba(0,0,0,0.9)] max-w-[420px] w-full">
             <div className="w-16 h-16 rounded-full bg-emerald-500 text-black flex items-center justify-center mx-auto mb-4"><Crown className="w-8 h-8" /></div>
-            <div className="text-[22px] font-[900]">You're now clear-plus1.0 🎉</div>
+            <div className="text-[22px] font-[900]">You're now Clear+ 🎉</div>
             <div className="text-[13px] text-white/60 mt-2 leading-[1.5]">Premium unlocked. Unlimited SOS, analytics, progress tools. Thanks for supporting free quitters.</div>
             <button onClick={() => setShowSuccessCelebration(false)} className="mt-5 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px]">Let's go</button>
           </div>
@@ -883,7 +909,7 @@ export default function App() {
               <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="w-9 h-9 rounded-[12px] overflow-hidden"><img src="/favicon.svg?v=2" alt="" className="w-full h-full" /></button>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">clear-plus1.0</span>
+                  <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">Clear+</span>
 
                   {isPremium && <span className="app-accent-soft hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"><Crown className="w-3 h-3" /> PLUS</span>}
                   <button onClick={() => { setActiveTab('dashboard') }} className="hidden sm:flex text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40 hover:text-white/70">Home</button>
@@ -908,7 +934,7 @@ export default function App() {
                 <div className="app-accent-dot w-2 h-2 rounded-full animate-pulse" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
               </div>
               {!isPremium ? (
-                <button onClick={() => openPaywall('clear-plus1.0 Premium')} className="app-accent-fill h-9 px-4 rounded-full text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition">
+                <button onClick={() => openPaywall('Clear+ Premium')} className="app-accent-fill h-9 px-4 rounded-full text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition">
                   <Crown className="w-4 h-4" /> Upgrade
                 </button>
               ) : (
@@ -929,7 +955,7 @@ export default function App() {
           )}
 
           <main key={activeTab} className="tab-panel relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
-            {activeTab === 'dashboard' && <Remodel region={region} currency={currency} signedIn={!!user} quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
+            {activeTab === 'dashboard' && <Remodel region={region} currency={currency} signedIn={!!user} quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('Clear+ Premium')} />}
             {activeTab === 'analytics' && (
                 <div className="lg:col-span-5 space-y-6">
                   {/* Premium Analytics */}
@@ -964,7 +990,7 @@ export default function App() {
                           <div className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center mb-3 shadow-[0_8px_24px_rgba(255,255,255,0.2)]"><Crown className="w-6 h-6" /></div>
                           <div className="text-[15px] font-bold tracking-[-0.01em]">Unlock Premium Analytics</div>
                           <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: {money(yearlyCost)} saved.</div>
-                          <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with clear-plus1.0</button>
+                          <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with Clear+</button>
                         </div>
                       )}
                     </div>
@@ -1218,7 +1244,7 @@ export default function App() {
                     ) : (
                       <div className="space-y-3">
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Unlimited craving logs, timer, basic savings, 3 guided breathing sessions per day, 7-day history</div></div>
-                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to clear-plus1.0 from AUD $9.99/mo</button>
+                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to Clear+ from AUD $9.99/mo</button>
                       </div>
                     )}
                   </div>
@@ -1239,13 +1265,13 @@ export default function App() {
           </main>
 
           <footer className="relative z-10 border-t border-white/[0.06] mt-8 py-4 px-4 lg:px-7 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-white/25">
-            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in {currency} • {support.supportName} {support.phone} • {user ? (syncStatus === 'synced' ? 'Progress synced' : syncStatus === 'error' ? 'Progress sync paused' : 'Progress syncing') : 'Progress saved in this browser'}</div>
+            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> Clear+ • By a former smoker, for future non-smokers • Estimates in {currency} • {support.supportName} {support.phone} • {user ? (syncStatus === 'synced' ? 'Progress synced' : syncStatus === 'error' ? 'Progress sync paused' : 'Progress syncing') : 'Progress saved in this browser'}</div>
             <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • AUD $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • {money(moneySaved)} saved</span></div>
           </footer>
         </>
       )}
 
-      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">{user ? 'Progress and verified premium access sync to your signed-in account.' : 'Progress is stored in this browser until you sign in from Settings.'}</p></section></div>}
+      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="Clear+ Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">Clear+ Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">{user ? 'Progress and verified premium access sync to your signed-in account.' : 'Progress is stored in this browser until you sign in from Settings.'}</p></section></div>}
 
       {/* Share Modal */}
       {showShare && (
@@ -1283,10 +1309,10 @@ export default function App() {
                     // @ts-ignore
                     if (navigator.canShare && navigator.canShare({ files: [file] })) {
                       // @ts-ignore
-                      await navigator.share({ files: [file], title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with clear-plus1.0!` });
+                      await navigator.share({ files: [file], title: 'I quit with Clear+', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with Clear+!` });
                     } else if (navigator.share) {
                       // @ts-ignore
-                      await navigator.share({ title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app` });
+                      await navigator.share({ title: 'I quit with Clear+', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with Clear+! www.clear-plus.app` });
                     } else {
                       const url = URL.createObjectURL(blob);
                       window.open(url, '_blank');
@@ -1300,7 +1326,7 @@ export default function App() {
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button onClick={() => {
-                  const text = `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app`;
+                  const text = `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with Clear+! www.clear-plus.app`;
                   const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://www.clear-plus.app')}&quote=${encodeURIComponent(text)}`;
                   window.open(url, '_blank');
                 }} className="h-10 rounded-[10px] bg-[#1877F2]/15 border border-[#1877F2]/20 text-[#8AB4FF] text-[12px] font-semibold flex items-center justify-center gap-2"><Facebook className="w-4 h-4" /> Facebook</button>
@@ -1356,7 +1382,7 @@ export default function App() {
         <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" onClick={() => setShowInstallHelp(false)} />
           <div className="relative w-full sm:max-w-[420px] rounded-t-[24px] sm:rounded-[24px] bg-[#161618] border border-white/[0.10] p-6">
-            <div className="flex items-center justify-between mb-5"><h3 className="font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Install clear-plus1.0</h3><button onClick={() => setShowInstallHelp(false)} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
+            <div className="flex items-center justify-between mb-5"><h3 className="font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Install Clear+</h3><button onClick={() => setShowInstallHelp(false)} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
             <div className="space-y-4 text-[13px] leading-[1.6] text-white/70">
               <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="font-bold text-white mb-2">How to install:</div><ul className="space-y-2 text-[12px]"><li><span className="text-white font-medium">Chrome / Edge:</span> Address bar → Install icon or Menu → Install app.</li><li><span className="text-white font-medium">Android:</span> ⋮ → Add to Home screen.</li><li><span className="text-white font-medium">iOS Safari:</span> Share → Add to Home Screen.</li></ul></div>
               <button onClick={() => setShowInstallHelp(false)} className="w-full h-11 rounded-[12px] bg-white text-black font-bold">Got it</button>
