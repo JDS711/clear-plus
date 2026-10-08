@@ -30,7 +30,7 @@ Android packaging, Google Play Billing or an approved regional billing programme
 - Test real phone/PC sync after checking the deployed user_state table and policies; mocked sync tests do not certify the live database.
 - The comic option uses bundled OFL-licensed Comic Neue, not unlicensed distribution of Microsoft Comic Sans.
 - Colour controls are four unlabelled visual swatches with accessible names and keyboard focus.
-- The brand smoke/wind icon is fixed green and shared across the header/favicon/home-screen assets. Old installed shortcuts can cache icons; removal and re-addition may be necessary. No native store icon has been published.
+- The original smoke/wind artwork is shared across header/favicon/home-screen assets. The in-app header tile and static browser/home-screen assets use fixed bright blue (#2563eb), independent of the selected accent. Old installed shortcuts can cache icons; removal and re-addition may be necessary. No native store icon has been published.
 
 ## Quit-date sync correction
 The quit-smoking start date now has an independent edit revision and edit ID. Changing font/currency/accent on a stale device cannot overwrite a newer quit-date edit. Older in-flight cloud responses are merged with the latest local state before applying them. Legacy rows migrate without schema changes because the metadata is in the existing JSON state. Test phone date edit -> PC refresh -> PC refresh back to phone, and PC date edit -> mobile refresh. Concurrent offline date edits at the same revision resolve deterministically by edit ID (not a claim of globally ordered real-time edits).
@@ -39,3 +39,18 @@ The quit-smoking start date now has an independent edit revision and edit ID. Ch
 Restored the exact original installed lucide Wind paths and original 20px-in-36px header proportions; regenerated the favicon and home-screen PNGs with v3 cache-busting references. The Premium Analytics header tile, locked badge and central crown now share the selected accent colour and accent-tinted background. Re-add existing home-screen shortcuts if their cached icon does not update.
 
 Numeric input steppers now use accessible custom up/down buttons (44px touch targets), selected-accent arrows/backgrounds and matching keyboard ArrowUp/ArrowDown behaviour. Native OS spinners are hidden; decimal step/min/max handling is preserved. No data or account changes are involved in these appearance corrections.
+
+The Restore Premium purchase control is only shown after sign-in. Signed-out users see the email sign-in form without a redundant restore button that would merely request sign-in.
+
+Latest branding choice supersedes earlier accent-linked branding: fixed bright blue (#2563eb) with the original white smoke artwork across header/browser/home-screen assets. v4 asset references refresh browser caches; installed shortcuts may still need re-adding.
+
+## Three simultaneous signed-in sessions — release rollout
+- Migration `supabase/migrations/202610080001_three_device_sessions.sql` adds a private server-side registry and restrictive cloud-state policy. The enforcement flag starts **false** so the old live app keeps working until the new build deploys.
+- Payment APIs check the same session admission gate. Only verified, admitted sessions can verify/restore/buy. No service key is exposed to the browser.
+- The fourth browser/device prompts for an explicit replacement. Replacing a device blocks its old token from cloud state and payment endpoints; refresh cannot silently reclaim its slot. A fresh login is required.
+- Slots refer to Supabase login sessions: separate browsers/origins can count separately, whereas tabs sharing browser storage generally share one slot. Signing out uses local scope and frees only that slot.
+- Before activation: rollback-only database checks verified first-three admission, fourth denial, replacement, displaced JWT rejection, restrictive cloud-read denial, anonymous denial and direct-write denial. Test changes were rolled back; no real auth sessions or user progress were deleted.
+- Local mocked browser checks cover quit-date edits in both directions, stale and in-flight response protection, and the fourth-device replacement interface. These do not replace user testing of real email sign-in and Stripe billing.
+- After production serves the new `public/release.json` marker, enable with `update public.app_security_settings set enforce_device_limit = true where id;`.
+- Rollback order: first set `enforce_device_limit = false`, then revert the web release. Keep the new tables/policy in place with enforcement off; do not drop user data.
+- Original production commit for rollback: `33eee17c5deece6c4b8271fdb6de0f405da00e4f`.

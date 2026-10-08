@@ -68,3 +68,6 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 
 /* Quit-date editors use the selected accent instead of a fixed orange focus ring. */
 .clear-shell input[type="datetime-local"]:focus{border-color:var(--theme-accent);outline:3px solid var(--theme-accent);outline-offset:3px;box-shadow:none;accent-color:var(--theme-accent)}
+
+/* Fixed bright-blue brand identity, independent of the selected accent palette. */
+.clear-shell .app-brand-tile{background:#2563eb;color:#fff}

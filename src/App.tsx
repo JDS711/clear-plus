@@ -2,7 +2,7 @@ import { REGIONS, CURRENCIES, validRegion, validCurrency, formatMoney } from '..
 import Remodel from './Remodel';
 import EditableNumberInput from './EditableNumberInput';
 import { supabase } from './supabase';
-import type { User } from '@supabase/supabase-js';
+import useDeviceSessions from './useDeviceSessions';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { buildSavingsProjection } from '../lib/progress.js';
 import { reconcileCloudStates } from '../lib/cloud-sync.js';
@@ -218,7 +218,7 @@ export default function App() {
   // The fabricated "community saved" counter was removed deliberately. It was never
   // rendered, and no such aggregate exists. Do not reintroduce invented social proof.
   const [referral, setReferral] = useState<string>('');
-  const [user, setUser] = useState<User | null>(null);
+  const { user, pendingUser, admission, error: deviceError, busy: deviceBusy, signOutDevice, retryAdmission, replaceDevice } = useDeviceSessions();
   const [authEmail, setAuthEmail] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
@@ -385,20 +385,6 @@ export default function App() {
       else localStorage.removeItem('clear_premium_session');
     } catch {}
   }, [premiumSession]);
-
-  useEffect(() => {
-    let active = true;
-    supabase.auth.getUser().then(({ data }) => {
-      if (active) setUser(data.user);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setUser(session?.user ?? null);
-    });
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -595,11 +581,10 @@ export default function App() {
   };
   const signOut = async () => {
     setIsPremium(false);
-    await supabase.auth.signOut();
-    setUser(null);
+    await signOutDevice();
     setCloudReady(false);
     setSyncStatus('local');
-    pushToast({ title: 'Signed out', body: 'Your local progress is still on this device.' });
+    pushToast({ title: 'Sign-out requested', body: 'Your local progress is still on this device.' });
   };
 
   const restorePremium = async () => {
@@ -906,7 +891,7 @@ export default function App() {
           {/* App Header */}
           <header className="app-header relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] backdrop-blur-2xl sticky top-0">
             <div className="flex items-center gap-4">
-              <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="w-9 h-9 rounded-[12px] overflow-hidden"><img src="/favicon.svg?v=3" alt="" className="w-full h-full" /></button>
+              <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="app-brand-tile w-9 h-9 rounded-[12px] flex items-center justify-center"><Wind aria-hidden="true" className="w-5 h-5" /></button>
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">Clear+</span>
@@ -1209,11 +1194,12 @@ export default function App() {
                 <div className="lg:col-span-5 space-y-6">
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <div className="flex items-center gap-2 mb-4"><Cloud className="w-5 h-5 text-sky-300" /><h3 className="text-[14px] font-bold">Account & sync</h3></div>
-                  <button type="button" onClick={restorePremium} className="min-h-11 rounded-xl border p-3">Restore Premium purchase</button>
-                  <p className="text-sm">Sign in using the email on your Stripe receipt, then restore. Free tools do not require an account.</p>
+                  <p className="text-sm">Sign in using the email on your Stripe receipt to sync your progress and access your account. Free tools do not require an account.</p>
 
                     {user ? (
                       <div className="space-y-4">
+                  <button type="button" onClick={restorePremium} className="min-h-11 rounded-xl border p-3">Restore Premium purchase</button>
+
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4">
                           <div className="text-[11px] uppercase tracking-widest text-white/35 font-bold">Signed in as</div>
                           <div className="text-[13px] font-bold mt-1 break-all">{user.email}</div>
@@ -1221,9 +1207,23 @@ export default function App() {
                             {syncStatus === 'synced' ? '✓ Progress synced' : syncStatus === 'saving' ? 'Syncing changes…' : syncStatus === 'loading' ? 'Loading your progress…' : syncStatus === 'error' ? 'Sync paused — ' + syncError : 'Stored on this device'}
                           </div>
                         </div>
-                        <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices.</p>
+                        <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices. Up to 3 devices or browsers can stay signed in at once.</p>
                         <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Cloud className="w-4 h-4" /> Refresh this device from cloud</button>
                         <button onClick={signOut} className="w-full h-11 rounded-[12px] bg-white/[0.05] border border-white/[0.10] text-[12px] font-bold flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> Sign out</button>
+                      </div>
+                    ) : pendingUser ? (
+                      <div className="space-y-3" role="status">
+                        <h4 className="text-[14px] font-bold">{deviceError ? 'Device check unavailable' : admission?.revoked ? 'This device was signed out' : 'Three devices are already signed in'}</h4>
+                        <p className="text-[12px]">{deviceError || (admission?.revoked ? 'Sign out here, then request a fresh email link to sign in again.' : 'Choose a device to sign out before using this one. Your cloud progress will not be deleted.')}</p>
+                        {!admission?.revoked && admission?.sessions.map(device => (
+                          <div key={device.id} className="rounded-xl border p-3 space-y-2">
+                            <p className="text-[12px] font-bold">{device.label}</p>
+                            <p className="text-[10px]">Last active: {new Date(device.lastSeen).toLocaleString()}</p>
+                            <button type="button" disabled={deviceBusy} onClick={() => replaceDevice(device.id)} className="min-h-11 w-full rounded-xl border p-2">Sign out this device and use mine</button>
+                          </div>
+                        ))}
+                        {!admission?.revoked && <button type="button" disabled={deviceBusy} onClick={retryAdmission} className="min-h-11 w-full rounded-xl border p-2">{deviceBusy ? 'Checking…' : 'Try again'}</button>}
+                        <button type="button" disabled={deviceBusy} onClick={signOut} className="min-h-11 w-full rounded-xl border p-2">Sign out here</button>
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -1231,7 +1231,7 @@ export default function App() {
                         <label className="text-[10px] uppercase tracking-widest font-bold text-white/35 block">Email address</label>
                         <input type="email" autoComplete="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') sendSignInLink(); }} placeholder="you@example.com" className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" />
                         <button disabled={authBusy || !authEmail.trim()} onClick={sendSignInLink} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 disabled:opacity-50"><Mail className="w-4 h-4" /> {authBusy ? 'Sending…' : 'Email me a sign-in link'}</button>
-                        <p className="text-[10px] text-white/35">Use the same email on every device. The link signs you in securely and expires automatically.</p>
+                        <p className="text-[10px] text-white/35">Use the same email on every device. Request a fresh, single-use link on each device. Up to 3 devices or browsers can stay signed in at once.</p>
                       </div>
                     )}
                   </div>
