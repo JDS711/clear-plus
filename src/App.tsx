@@ -601,19 +601,6 @@ export default function App() {
     pushToast({ title: 'Sign-out requested', body: 'Your local progress is still on this device.' });
   };
 
-  const restorePremium = async () => {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session) { pushToast({ title: 'Sign in first', body: 'Use the email on your Stripe receipt.' }); return; }
-    try {
-      const response = await fetch('/api/restore-access', { headers: { Authorization: 'Bearer ' + data.session.access_token } });
-      const result = await response.json();
-      if (!response.ok) throw new Error();
-      if (result.paid && result.sessionId) {
-        setPremiumSession(result.sessionId); setIsPremium(true); setBilling(result.billing);
-        pushToast({ title: 'Premium restored', body: 'Your purchase was verified with Stripe.' });
-      } else { pushToast({ title: 'No active purchase found', body: 'Check that you signed in with your purchase email. Older purchases may need support.' }); }
-    } catch { pushToast({ title: 'Restore unavailable', body: 'Your purchase has not been removed. Please try again later.' }); }
-  };
 
   // === CALCS ===
   const diffMs = quitDate ? Math.max(0, now.getTime() - quitDate.getTime()) : 0;
@@ -1213,7 +1200,6 @@ export default function App() {
 
                     {user ? (
                       <div className="space-y-4">
-                  <button type="button" onClick={restorePremium} className="min-h-11 rounded-xl border p-3">Restore Premium purchase</button>
 
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4">
                           <div className="text-[11px] uppercase tracking-widest text-white/35 font-bold">Signed in as</div>
