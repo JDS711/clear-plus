@@ -50,8 +50,8 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 .clear-shell button,.clear-shell input,.clear-shell select,.clear-shell textarea{font-family:inherit}
 .accent-tiles{display:grid;grid-template-columns:repeat(4,minmax(44px,1fr));gap:12px}
 .clear-shell .accent-tile{min-height:54px;border-radius:14px;border:3px solid transparent;box-shadow:inset 0 0 0 1px #0002}
-.clear-shell .accent-tile[aria-pressed="true"]{outline:3px solid var(--theme-text);outline-offset:3px;border-color:var(--theme-surface)}
-.clear-shell .accent-tile:focus-visible{outline:3px solid var(--theme-text);outline-offset:3px}
+.clear-shell .accent-tile[aria-pressed="true"]{outline:none;border-color:var(--theme-accent)}
+.clear-shell .accent-tile:focus-visible{outline:2px solid var(--theme-accent);outline-offset:2px}
 .clear-shell .piggy-accent{color:var(--theme-accent)}
 .app-accent-icon{color:var(--theme-accent)}
 
@@ -71,3 +71,46 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 
 /* Fixed bright-blue brand identity, independent of the selected accent palette. */
 .clear-shell .app-brand-tile{background:#2563eb;color:#fff}
+
+/* Consistent accent typography: no near-black copy or fixed-green leftovers. */
+.clear-shell[data-display-mode="light"]{--theme-text:var(--theme-accent);--theme-muted:var(--theme-accent)}
+.clear-shell[data-display-mode="night"]{--theme-text:var(--theme-highlight);--theme-muted:var(--theme-highlight)}
+.clear-shell :is(input,select,textarea,button){color:var(--theme-text)}
+.clear-shell .app-readable-text{color:var(--theme-text)}
+.clear-shell .remodel small{color:var(--theme-muted)}
+.clear-shell .new-timeline article small{color:var(--theme-text)}
+.clear-shell .new-note,.clear-shell .new-story blockquote{border-left-color:var(--theme-accent)}
+.clear-shell .new-timeline article,.clear-shell .remodel details,.clear-shell .pause-panel{border-color:var(--theme-border)}
+.clear-shell .app-header{color:var(--theme-text)}
+.clear-shell button[aria-pressed]{border-color:var(--theme-border);color:var(--theme-text)}
+.clear-shell button[aria-pressed="true"]{border-color:var(--theme-accent)}
+.clear-shell .accent-tile{border-width:1px;border-color:var(--theme-border);box-shadow:none;outline:none}
+.clear-shell .accent-tile[aria-pressed="true"]{border:1px solid var(--theme-accent);outline:none;outline-offset:0}
+.clear-shell .accent-tile:focus-visible{outline:2px solid var(--theme-accent);outline-offset:2px}
+.clear-shell :is(button.bg-white,.app-accent-fill,.dashboard-return,.breathing-icon-tile){background:var(--theme-accent);color:#fff}
+.clear-shell :is(button.bg-white,.app-accent-fill,.dashboard-return,.breathing-icon-tile) :is(svg,span){color:inherit}
+.clear-shell .remodel .journey{color:#fff}
+.clear-shell .remodel .journey button{background:var(--theme-surface);color:var(--theme-text);border:1px solid var(--theme-border)}
+.clear-shell .remodel .journey :is(label,input){color:var(--theme-text)}
+.clear-shell .remodel .journey small{color:#fff}
+.clear-shell .breath-orb{background:linear-gradient(135deg,var(--theme-accent),color-mix(in srgb,var(--theme-accent),#000 18%))}
+.clear-shell .breath-orb-copy,.clear-shell .breath-orb-copy [class*="text-white"]{color:#fff}
+.clear-shell .breathing-reset{border-radius:14px;min-height:48px;padding:0 18px;white-space:nowrap}
+.clear-shell .breathing-icon-tile{border-radius:12px;flex-shrink:0}
+.clear-shell .journal-mood-label{color:var(--theme-text);border-color:color-mix(in srgb,var(--theme-accent),transparent 55%);background:transparent}
+.clear-shell .cloud-sync-button:disabled{opacity:1;cursor:progress}
+.clear-shell .auth-link-notice{color:var(--theme-text);background:var(--theme-soft);border:1px solid var(--theme-border);border-radius:14px;padding:16px;margin:0 0 16px}
+.clear-shell :is(input,select,textarea){background-color:var(--theme-surface);border-color:var(--theme-border);color:var(--theme-text);color-scheme:light}
+.clear-shell[data-display-mode="night"] :is(input,select,textarea){color-scheme:dark}
+.clear-shell option{background:var(--theme-surface);color:var(--theme-text)}
+.clear-shell .pledge-value{color:var(--theme-text);background:var(--theme-surface);border:1px solid var(--theme-border);border-radius:8px;padding:3px 7px;white-space:nowrap}
+.clear-shell .remodel .journey button{background:color-mix(in srgb,var(--theme-accent),#000 18%);color:#fff;border-color:color-mix(in srgb,var(--theme-highlight),transparent 50%);border-radius:14px}
+/* White action labels keep readable contrast in both light and night palettes. */
+.clear-shell[data-theme="green"]{--theme-action:#3f8159}
+.clear-shell[data-theme="warm"]{--theme-action:#9b6622}
+.clear-shell[data-theme="rose"]{--theme-action:#9e4a56}
+.clear-shell[data-theme="blue"]{--theme-action:#486f86}
+.clear-shell :is(button.bg-white,.app-accent-fill,.dashboard-return,.breathing-icon-tile){background:var(--theme-action);color:#fff}
+.clear-shell .remodel .journey{background:var(--theme-action)}
+.clear-shell .breath-orb{background:linear-gradient(135deg,var(--theme-action),color-mix(in srgb,var(--theme-action),#000 18%))}
+.clear-shell[data-display-mode] .remodel .new-note,.clear-shell[data-display-mode] .new-story blockquote{border-left-color:var(--theme-accent)}
