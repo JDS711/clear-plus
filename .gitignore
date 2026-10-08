@@ -3,3 +3,6 @@ dist/
 .vercel/
 .env*
 !.env.example
+
+# Recreated deterministically by scripts/generate-icons.mjs during build
+public/icons/*-v*.png

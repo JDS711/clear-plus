@@ -1,3 +1,4 @@
+import { authenticatedUser } from '../lib/auth.js';
 import { resolveSession } from '../lib/verify.js';
 
 // Answers ONE question: is this Stripe session a real, still-current purchase?
@@ -13,7 +14,10 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ paid: false });
 
-  const result = await resolveSession(req.query?.session_id);
+  let user;
+  try { user = await authenticatedUser(req); } catch { return res.status(503).json({ paid: false, temporary: true }); }
+  if (!user) return res.status(401).json({ paid: false, needsSignIn: true });
+  const result = await resolveSession(req.query?.session_id, process.env, user);
   if (!result.ok) return res.status(result.code).json({ paid: false });
 
   return res.status(200).json({

@@ -1,10 +1,13 @@
+import { REGIONS, CURRENCIES, validRegion, validCurrency, formatMoney } from '../lib/regions.js';
 import Remodel from './Remodel';
 import EditableNumberInput from './EditableNumberInput';
 import { supabase } from './supabase';
-import type { User } from '@supabase/supabase-js';
+import useDeviceSessions from './useDeviceSessions';
 import { FREE_GUIDED_SESSIONS, canStartGuidedBreathing, nextGuidedUseCount } from '../lib/sos.js';
 import { buildSavingsProjection } from '../lib/progress.js';
 import { reconcileCloudStates } from '../lib/cloud-sync.js';
+import { saveCloudState, syncErrorLabel } from '../lib/cloud-store.js';
+import './comic-font.css';
 import { Analytics } from "@vercel/analytics/react";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -53,7 +56,7 @@ const FONT_OPTIONS: Array<{ id: AppFont; label: string; stack: string }> = [
   { id: 'trebuchet', label: 'Trebuchet MS', stack: 'Trebuchet MS, Arial, sans-serif' },
   { id: 'georgia', label: 'Georgia', stack: 'Georgia, serif' },
   { id: 'times', label: 'Times New Roman', stack: 'Times New Roman, serif' },
-  { id: 'comic', label: 'Comic Sans MS', stack: 'Comic Sans MS, cursive' },
+  { id: 'comic', label: 'Comic (Comic Neue)', stack: '"Clear Comic", cursive' },
   { id: 'courier', label: 'Courier New', stack: 'Courier New, monospace' },
   { id: 'calibri', label: 'Calibri', stack: 'Calibri, Arial, sans-serif' },
   { id: 'tahoma', label: 'Tahoma', stack: 'Tahoma, Verdana, sans-serif' },
@@ -79,7 +82,44 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('app');
 
   // === CORE STATE ===
-  const [quitDate, setQuitDate] = useState<Date | null>(() => {
+  const [settingsUpdatedAt, setSettingsUpdatedAt] = useState(() => {
+    try { return Number(localStorage.getItem('clear_settingsUpdatedAt')) || 0; } catch { return 0; }
+  });
+  const markSettingsChanged = () => setSettingsUpdatedAt(previous => Math.max(Date.now(), previous + 1));
+  useEffect(() => { try { localStorage.setItem('clear_settingsUpdatedAt', String(settingsUpdatedAt)); } catch {} }, [settingsUpdatedAt]);
+
+  const [region, setRegionRaw] = useState(() => {
+    try { return validRegion(localStorage.getItem('clear_region')); } catch { return 'AU'; }
+  });
+  const [currency, setCurrencyRaw] = useState(() => {
+    try { return validCurrency(localStorage.getItem('clear_currency'), validRegion(localStorage.getItem('clear_region'))); } catch { return 'AUD'; }
+  });
+  const support = REGIONS[region];
+  const money = (value: number) => formatMoney(value, currency, region, 0);
+  const verifyPurchase = async (sessionId: string) => {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return { paid: false, needsSignIn: true, billing: undefined, temporary: false };
+    const response = await fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId), {
+      headers: { Authorization: 'Bearer ' + data.session.access_token },
+    });
+    if (response.status >= 500) return { paid: false, temporary: true, needsSignIn: false, billing: undefined };
+    return response.json();
+  };
+  useEffect(() => {
+    try { localStorage.setItem('clear_region', region); localStorage.setItem('clear_currency', currency); } catch {}
+  }, [region, currency]);
+
+  const [quitDateRevision, setQuitDateRevision] = useState(() => {
+    try { const value = Number(localStorage.getItem('clear_quitDateRevision')); return Number.isSafeInteger(value) && value >= 0 ? value : 0; } catch { return 0; }
+  });
+  const [quitDateEditId, setQuitDateEditId] = useState(() => {
+    try { return localStorage.getItem('clear_quitDateEditId') || ''; } catch { return ''; }
+  });
+  const latestCloudStateRef = useRef<Record<string, any>>({});
+  useEffect(() => {
+    try { localStorage.setItem('clear_quitDateRevision', String(quitDateRevision)); localStorage.setItem('clear_quitDateEditId', quitDateEditId); } catch {}
+  }, [quitDateRevision, quitDateEditId]);
+  const [quitDate, setQuitDateRaw] = useState<Date | null>(() => {
     try {
       const stored = localStorage.getItem('clear_quitDate');
       const date = stored ? new Date(stored) : null;
@@ -87,13 +127,13 @@ export default function App() {
     } catch {}
     return null;
   });
-  const [cigsPerDay, setCigsPerDay] = useState(() => {
+  const [cigsPerDay, setCigsPerDayRaw] = useState(() => {
     try { const v = localStorage.getItem('clear_cigsPerDay'); return v ? parseInt(v) : 20; } catch { return 20; }
   });
-  const [costPerPack, setCostPerPack] = useState(() => {
+  const [costPerPack, setCostPerPackRaw] = useState(() => {
     try { const v = localStorage.getItem('clear_costPerPack'); return v ? parseFloat(v) : 50; } catch { return 50; }
   });
-  const [packSize, setPackSize] = useState(() => {
+  const [packSize, setPackSizeRaw] = useState(() => {
     try { const v = localStorage.getItem('clear_packSize'); return v ? parseInt(v) : 25; } catch { return 25; }
   });
   // Premium is NEVER read from storage.
@@ -114,23 +154,23 @@ export default function App() {
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallFeature, setPaywallFeature] = useState('Premium Analytics');
   const [billing, setBilling] = useState<'monthly' | 'yearly' | 'lifetime'>('yearly');
-  const [appTheme, setAppTheme] = useState<AppTheme>(() => {
+  const [appTheme, setAppThemeRaw] = useState<AppTheme>(() => {
     try {
       const value = localStorage.getItem('clear_theme') as AppTheme | null;
       return THEME_OPTIONS.some(option => option.id === value) ? value! : 'green';
     } catch { return 'green'; }
   });
-  const [appFont, setAppFont] = useState<AppFont>(() => {
+  const [appFont, setAppFontRaw] = useState<AppFont>(() => {
     try {
       const value = localStorage.getItem('clear_font') as AppFont | null;
       return FONT_OPTIONS.some(option => option.id === value) ? value! : 'segoe';
     } catch { return 'segoe'; }
   });
-  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
+  const [displayMode, setDisplayModeRaw] = useState<DisplayMode>(() => {
     try { return localStorage.getItem('clear_displayMode') === 'night' ? 'night' : 'light'; }
     catch { return 'light'; }
   });
-  const [textSize, setTextSize] = useState<TextSize>(() => {
+  const [textSize, setTextSizeRaw] = useState<TextSize>(() => {
     try { return localStorage.getItem('clear_textSize') === 'large' ? 'large' : 'standard'; }
     catch { return 'standard'; }
   });
@@ -178,12 +218,14 @@ export default function App() {
   // The fabricated "community saved" counter was removed deliberately. It was never
   // rendered, and no such aggregate exists. Do not reintroduce invented social proof.
   const [referral, setReferral] = useState<string>('');
-  const [user, setUser] = useState<User | null>(null);
+  const { user, pendingUser, admission, error: deviceError, busy: deviceBusy, signOutDevice, retryAdmission, replaceDevice } = useDeviceSessions();
   const [authEmail, setAuthEmail] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
   const [syncRequest, setSyncRequest] = useState(0);
+  const [syncError, setSyncError] = useState('');
+  const lastSyncedStateRef = useRef('');
   const [premiumSession, setPremiumSession] = useState(() => {
     try { return localStorage.getItem('clear_premium_session') || ''; } catch { return ''; }
   });
@@ -216,8 +258,31 @@ export default function App() {
   return [];
 });
 
+  const setRegion = (value: string) => { markSettingsChanged(); setRegionRaw(value); };
+  const setCurrency = (value: string) => { markSettingsChanged(); setCurrencyRaw(value); };
+  const setQuitDate = (value: Date | null) => {
+    if (value && !Number.isFinite(value.getTime())) return;
+    const revision = Math.max(quitDateRevision, Number(latestCloudStateRef.current.quitDateRevision) || 0) + 1;
+    const editId = crypto.randomUUID();
+    // Update the ref immediately: an older in-flight cloud response may finish before React re-renders.
+    latestCloudStateRef.current = { ...latestCloudStateRef.current, quitDate: value?.toISOString() || null, quitDateRevision: revision, quitDateEditId: editId };
+    markSettingsChanged(); setQuitDateRevision(revision); setQuitDateEditId(editId); setQuitDateRaw(value);
+  };
+  const setCigsPerDay = (value: number) => { markSettingsChanged(); setCigsPerDayRaw(value); };
+  const setCostPerPack = (value: number) => { markSettingsChanged(); setCostPerPackRaw(value); };
+  const setPackSize = (value: number) => { markSettingsChanged(); setPackSizeRaw(value); };
+  const setAppTheme = (value: AppTheme) => { markSettingsChanged(); setAppThemeRaw(value); };
+  const setAppFont = (value: AppFont) => { markSettingsChanged(); setAppFontRaw(value); };
+  const setDisplayMode = (value: DisplayMode) => { markSettingsChanged(); setDisplayModeRaw(value); };
+  const setTextSize = (value: TextSize) => { markSettingsChanged(); setTextSizeRaw(value); };
+
   const cloudState = useMemo(() => ({
-    version: 2,
+    version: 5,
+    quitDateRevision,
+    quitDateEditId,
+    settingsUpdatedAt,
+    region,
+    currency,
     quitDate: quitDate?.toISOString() || null,
     cigsPerDay,
     costPerPack,
@@ -231,20 +296,30 @@ export default function App() {
     displayMode,
     textSize,
     premiumSession: premiumSession || null,
-  }), [quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
+  }), [quitDateRevision, quitDateEditId, settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
 
-  const applyCloudState = (state: Record<string, any>) => {
+  latestCloudStateRef.current = cloudState;
+
+  const applyCloudState = (incoming: Record<string, any>) => {
+    // Keep edits made while the network request was in flight, rather than applying its stale snapshot.
+    const state = reconcileCloudStates(latestCloudStateRef.current, incoming);
+    latestCloudStateRef.current = state;
+    setQuitDateRevision(state.quitDateRevision);
+    setQuitDateEditId(state.quitDateEditId);
+    setSettingsUpdatedAt(Number(state.settingsUpdatedAt) || 0);
+    if (state.region) setRegionRaw(validRegion(state.region));
+    if (state.currency) setCurrencyRaw(validCurrency(state.currency, state.region || region));
     const syncedQuitDate = state.quitDate ? new Date(state.quitDate) : null;
-    if (!syncedQuitDate || Number.isFinite(syncedQuitDate.getTime())) setQuitDate(syncedQuitDate);
-    if (Number.isFinite(state.cigsPerDay)) setCigsPerDay(Math.max(1, state.cigsPerDay));
-    if (Number.isFinite(state.costPerPack)) setCostPerPack(Math.max(0, state.costPerPack));
-    if (Number.isFinite(state.packSize)) setPackSize(Math.max(1, state.packSize));
+    if (!syncedQuitDate || Number.isFinite(syncedQuitDate.getTime())) setQuitDateRaw(syncedQuitDate);
+    if (Number.isFinite(state.cigsPerDay)) setCigsPerDayRaw(Math.max(1, state.cigsPerDay));
+    if (Number.isFinite(state.costPerPack)) setCostPerPackRaw(Math.max(0, state.costPerPack));
+    if (Number.isFinite(state.packSize)) setPackSizeRaw(Math.max(1, state.packSize));
     if (Number.isFinite(state.sosUses)) setSosUses(Math.max(0, state.sosUses));
     if (typeof state.referral === 'string') setReferral(state.referral);
-    if (THEME_OPTIONS.some(option => option.id === state.appTheme)) setAppTheme(state.appTheme);
-    if (FONT_OPTIONS.some(option => option.id === state.appFont)) setAppFont(state.appFont);
-    if (state.displayMode === 'light' || state.displayMode === 'night') setDisplayMode(state.displayMode);
-    if (state.textSize === 'standard' || state.textSize === 'large') setTextSize(state.textSize);
+    if (THEME_OPTIONS.some(option => option.id === state.appTheme)) setAppThemeRaw(state.appTheme);
+    if (FONT_OPTIONS.some(option => option.id === state.appFont)) setAppFontRaw(state.appFont);
+    if (state.displayMode === 'light' || state.displayMode === 'night') setDisplayModeRaw(state.displayMode);
+    if (state.textSize === 'standard' || state.textSize === 'large') setTextSizeRaw(state.textSize);
 
     if (Array.isArray(state.cravings)) {
       setCravings(state.cravings.flatMap((item: any) => {
@@ -312,114 +387,74 @@ export default function App() {
   }, [premiumSession]);
 
   useEffect(() => {
-    let active = true;
-    supabase.auth.getUser().then(({ data }) => {
-      if (active) setUser(data.user);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setUser(session?.user ?? null);
-    });
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
+    let cancelled = false;
+    setIsPremium(false);
+    if (user && premiumSession) {
+      verifyPurchase(premiumSession).then(result => {
+        if (cancelled) return;
+        setIsPremium(!!result.paid);
+        if (result.paid && result.billing) setBilling(result.billing);
+      }).catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [user?.id, premiumSession]);
 
   useEffect(() => {
-    if (!user) {
-      setCloudReady(false);
-      setSyncStatus('local');
-      return;
-    }
-
+    if (!user) { setCloudReady(false); setSyncStatus('local'); lastSyncedStateRef.current = ''; return; }
     let cancelled = false;
-    setCloudReady(false);
-    setSyncStatus('loading');
-
+    setCloudReady(false); setSyncStatus('loading'); setSyncError('');
     const loadCloudState = async () => {
-      const { data, error } = await supabase
-        .from('user_state')
-        .select('state')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (cancelled) return;
-      if (error) {
-        setSyncStatus('error');
-        return;
-      }
-
-      const remote = data?.state as Record<string, any> | undefined;
-      const reconciled = reconcileCloudStates(cloudState, remote || {});
-      applyCloudState(reconciled);
-
-      const { error: saveError } = await supabase
-        .from('user_state')
-        .upsert({ user_id: user.id, state: reconciled, updated_at: new Date().toISOString() });
-      if (saveError) {
-        setSyncStatus('error');
-        return;
-      }
-
-      if (reconciled.premiumSession) {
-          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(reconciled.premiumSession))
-            .then(response => response.json())
-            .then(result => {
-              setIsPremium(!!result.paid);
-              if (result.paid && result.billing) setBilling(result.billing);
-              if (!result.paid) setPremiumSession('');
-            })
-            .catch(() => {});
-      }
-
-      if (!cancelled) {
-        setCloudReady(true);
-        setSyncStatus('synced');
-      }
+      try {
+        const { data, error } = await supabase.from('user_state').select('state').eq('user_id', user.id).maybeSingle();
+        if (cancelled) return;
+        if (error) { setSyncError(syncErrorLabel(error)); setSyncStatus('error'); return; }
+        const remote = data?.state as Record<string, any> | undefined;
+        const merged = reconcileCloudStates(latestCloudStateRef.current, remote || {});
+        const result = JSON.stringify(merged) === JSON.stringify(remote)
+          ? { state: merged }
+          : await saveCloudState(supabase, user.id, merged, { cancelled: () => cancelled });
+        if (cancelled || result.cancelled) return;
+        if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
+        lastSyncedStateRef.current = JSON.stringify(result.state);
+        applyCloudState(result.state);
+        setCloudReady(true); setSyncStatus(JSON.stringify(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
+      } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     };
-
     loadCloudState();
     return () => { cancelled = true; };
-    // The debounced save effect below handles subsequent state changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, syncRequest]);
 
   useEffect(() => {
-    if (!user || !cloudReady) return;
-    setSyncStatus('saving');
+    if (!user || !cloudReady || JSON.stringify(cloudState) === lastSyncedStateRef.current) return;
+    let cancelled = false;
+    setSyncStatus('saving'); setSyncError('');
     const timer = window.setTimeout(async () => {
-      const { data: latest, error: readError } = await supabase
-        .from('user_state')
-        .select('state')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      if (readError) {
-        setSyncStatus('error');
-        return;
-      }
-      // This effect only runs after local app state changes. On equal progress, the deliberate
-      // edit made on this device must win; otherwise every theme, font or cost edit immediately
-      // snaps back to the older cloud value.
-      const reconciled = reconcileCloudStates(cloudState, latest?.state || {}, { preferLocalSettings: true });
-      if (JSON.stringify(reconciled) !== JSON.stringify(cloudState)) applyCloudState(reconciled);
-      const { error } = await supabase
-        .from('user_state')
-        .upsert({ user_id: user.id, state: reconciled, updated_at: new Date().toISOString() });
-      setSyncStatus(error ? 'error' : 'synced');
+      try {
+        const result = await saveCloudState(supabase, user.id, latestCloudStateRef.current, { cancelled: () => cancelled });
+        if (cancelled || result.cancelled) return;
+        if (result.error) { setSyncError(syncErrorLabel(result.error)); setSyncStatus('error'); return; }
+        lastSyncedStateRef.current = JSON.stringify(result.state);
+        if (JSON.stringify(result.state) !== JSON.stringify(latestCloudStateRef.current)) applyCloudState(result.state);
+        setSyncStatus(JSON.stringify(latestCloudStateRef.current) === lastSyncedStateRef.current ? 'synced' : 'saving');
+      } catch { if (!cancelled) { setSyncError(syncErrorLabel(null)); setSyncStatus('error'); } }
     }, 650);
-    return () => window.clearTimeout(timer);
-  }, [user, cloudReady, cloudState]);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [user?.id, cloudReady, cloudState]);
 
   useEffect(() => {
     if (!user) return;
-    const refresh = () => setSyncRequest(request => request + 1);
+    const refresh = () => { if (document.visibilityState === 'visible') setSyncRequest(request => request + 1); };
+    const interval = window.setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
+      window.clearInterval(interval);
       window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
     const onHashChange = () => setActiveTabState(tabFromHash());
@@ -455,14 +490,17 @@ export default function App() {
       const sessionId = p.get('session_id');
 
       if (sessionId) {
+        setPremiumSession(sessionId);
+        p.delete('session_id');
+        window.history.replaceState(null, '', window.location.pathname + (p.toString() ? '?' + p.toString() : '') + window.location.hash);
         // Straight after payment. Verify with Stripe, then REMEMBER THE SESSION ID — that is the
         // credential every future load re-checks. No boolean is stored.
-        fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId)).then(r => r.json()).then(data => {
+        verifyPurchase(sessionId).then(data => {
           if (data.paid) {
             setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true);
             setPremiumSession(sessionId);
           } else {
-            pushToast({ title: 'Payment not confirmed', body: 'Please check your payment receipt.' });
+            pushToast({ title: data.needsSignIn ? 'Sign in to restore Premium' : 'Payment not confirmed', body: data.needsSignIn ? 'Use the email on your payment receipt in Settings.' : 'Please check your payment receipt and retry.' });
           }
         }).catch(() => pushToast({ title: 'Unable to verify payment', body: 'Keep your receipt and retry this page.' }));
       } else {
@@ -474,11 +512,11 @@ export default function App() {
         const storedSession = premiumSession;
 
         if (storedSession) {
-          fetch('/api/verify-checkout?session_id=' + encodeURIComponent(storedSession)).then(r => r.json()).then(data => {
+          verifyPurchase(storedSession).then(data => {
             setIsPremium(!!data.paid);
             if (data.paid && data.billing) setBilling(data.billing);
             // Drop a credential Stripe no longer honours, so we stop re-checking a dead session.
-            if (!data.paid) setPremiumSession('');
+            if (!data.paid && !data.needsSignIn && !data.temporary) setPremiumSession('');
           }).catch(() => {
             // Offline, or the server is unreachable. Premium is deliberately left OFF rather than
             // trusting local state, because any local grant is forgeable. See the handover note.
@@ -542,11 +580,25 @@ export default function App() {
     pushToast({ title: 'Check your email', body: 'Open the Clear+ sign-in link on this device.' });
   };
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
+    setIsPremium(false);
+    await signOutDevice();
     setCloudReady(false);
     setSyncStatus('local');
-    pushToast({ title: 'Signed out', body: 'Your local progress is still on this device.' });
+    pushToast({ title: 'Sign-out requested', body: 'Your local progress is still on this device.' });
+  };
+
+  const restorePremium = async () => {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) { pushToast({ title: 'Sign in first', body: 'Use the email on your Stripe receipt.' }); return; }
+    try {
+      const response = await fetch('/api/restore-access', { headers: { Authorization: 'Bearer ' + data.session.access_token } });
+      const result = await response.json();
+      if (!response.ok) throw new Error();
+      if (result.paid && result.sessionId) {
+        setPremiumSession(result.sessionId); setIsPremium(true); setBilling(result.billing);
+        pushToast({ title: 'Premium restored', body: 'Your purchase was verified with Stripe.' });
+      } else { pushToast({ title: 'No active purchase found', body: 'Check that you signed in with your purchase email. Older purchases may need support.' }); }
+    } catch { pushToast({ title: 'Restore unavailable', body: 'Your purchase has not been removed. Please try again later.' }); }
   };
 
   // === CALCS ===
@@ -569,10 +621,10 @@ export default function App() {
     { label: '24 hours', done: days >= 1, icon: '🔥' },
     { label: '3 days', done: days >= 3, icon: '🌿' },
     { label: '1 week', done: days >= 7, icon: '💪' },
-    { label: '$500 saved', done: moneySaved >= 500, icon: '💰' },
+    { label: `${money(500)} saved`, done: moneySaved >= 500, icon: '💰' },
     { label: '100 avoided', done: cigsAvoided >= 100, icon: '🚭' },
     { label: '5 cravings beaten', done: cravingsPassed >= 5, icon: '🏆' },
-    { label: '$1,000 saved', done: moneySaved >= 1000, icon: '🎯' },
+    { label: `${money(1000)} saved`, done: moneySaved >= 1000, icon: '🎯' },
     { label: '1 month', done: days >= 30, icon: '🌟' },
   ];
   const achievementsEarned = achievements.filter(achievement => achievement.done).length;
@@ -648,9 +700,12 @@ export default function App() {
       pushToast({ title: 'Plan unavailable', body: 'That plan is temporarily unavailable. The other plans are unaffected.' });
       return;
     }
+    if (!user) { setShowPaywall(false); setActiveTab('settings'); pushToast({ title: 'Sign in before upgrading', body: 'This links your purchase to your account so it can be restored.' }); return; }
     try {
+      const { data: auth } = await supabase.auth.getSession();
+      if (!auth.session) throw new Error('Sign in again');
       pushToast({ title: 'Opening secure checkout', body: 'Review your plan in Stripe before paying.' });
-      const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ billing: plan, customerEmail: user?.email, userId: user?.id }) });
+      const res = await fetch('/api/create-checkout', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + auth.session.access_token }, body: JSON.stringify({ billing: plan }) });
       const data = await res.json();
       if (!res.ok || !data.url) throw new Error('Checkout is unavailable. Please try again later.');
       window.location.assign(data.url);
@@ -692,7 +747,7 @@ export default function App() {
     for (let i = 0; i < W; i += 54) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, H); ctx.stroke(); }
     for (let i = 0; i < H; i += 54) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(W, i); ctx.stroke(); }
     // header
-    ctx.fillStyle = 'white'; ctx.font = '900 36px Inter, sans-serif'; ctx.fillText('clear-plus1.0', 64, 88);
+    ctx.fillStyle = 'white'; ctx.font = '900 36px Inter, sans-serif'; ctx.fillText('Clear+', 64, 88);
     ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '800 22px Inter, sans-serif'; ctx.fillText('', 168, 84);
     ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '600 14px Inter, sans-serif'; ctx.fillText('BY A FORMER SMOKER, FOR FUTURE NON-SMOKERS', 64, 120);
     // pill
@@ -701,7 +756,7 @@ export default function App() {
     if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(W - 280, 48, 216, 36, 18); ctx.fill(); ctx.stroke(); } else { ctx.fillRect(W - 280, 48, 216, 36); }
     ctx.fillStyle = '#6EE7B7'; ctx.font = '700 13px Inter'; ctx.fillText('PERSONAL ESTIMATE', W - 264, 70);
     // main number
-    const mainText = shareType === 'money' ? `$${moneySaved.toFixed(0)}` : `${days} DAYS`;
+    const mainText = shareType === 'money' ? `${money(moneySaved)}` : `${days} DAYS`;
     const subText = shareType === 'money' ? 'Spending avoided' : 'Smoke-Free';
     ctx.fillStyle = 'white'; ctx.font = '900 168px Inter, sans-serif'; ctx.fillText(mainText, 64, 420);
     ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = '700 64px Inter'; ctx.fillText(subText, 64, 500);
@@ -721,8 +776,8 @@ export default function App() {
     // quote
     ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'italic 500 22px Inter'; ctx.fillText(`"${QUOTES[days % QUOTES.length]}"`, 64, 780);
     // footer text
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '700 18px Inter'; ctx.fillText('I quit with clear-plus1.0', 240, 920);
-    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '500 15px Inter'; ctx.fillText('www.clear-plus.app • Quitline 13 7848', 240, 948);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '700 18px Inter'; ctx.fillText('I quit with Clear+', 240, 920);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '500 15px Inter'; ctx.fillText(`www.clear-plus.app • ${support.phone || support.supportName}`, 240, 948);
     ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = '500 13px Inter'; ctx.fillText('Not medical advice. You got this.', 240, 972);
   };
 
@@ -814,7 +869,7 @@ export default function App() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 pointer-events-none">
           <div className="pointer-events-auto rounded-[28px] bg-[#121214] border border-emerald-500/30 p-8 text-center shadow-[0_30px_100px_rgba(0,0,0,0.9)] max-w-[420px] w-full">
             <div className="w-16 h-16 rounded-full bg-emerald-500 text-black flex items-center justify-center mx-auto mb-4"><Crown className="w-8 h-8" /></div>
-            <div className="text-[22px] font-[900]">You're now clear-plus1.0 🎉</div>
+            <div className="text-[22px] font-[900]">You're now Clear+ 🎉</div>
             <div className="text-[13px] text-white/60 mt-2 leading-[1.5]">Premium unlocked. Unlimited SOS, analytics, progress tools. Thanks for supporting free quitters.</div>
             <button onClick={() => setShowSuccessCelebration(false)} className="mt-5 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px]">Let's go</button>
           </div>
@@ -836,10 +891,10 @@ export default function App() {
           {/* App Header */}
           <header className="app-header relative z-30 h-[68px] flex items-center justify-between px-4 lg:px-7 border-b border-white/[0.06] backdrop-blur-2xl sticky top-0">
             <div className="flex items-center gap-4">
-              <button onClick={() => { setActiveTab('dashboard') }} className="app-accent-fill w-9 h-9 rounded-[12px] flex items-center justify-center font-bold"><Wind className="w-5 h-5" /></button>
+              <button aria-label="Clear+ dashboard" onClick={() => { setActiveTab('dashboard') }} className="app-brand-tile w-9 h-9 rounded-[12px] flex items-center justify-center"><Wind aria-hidden="true" className="w-5 h-5" /></button>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">clear-plus1.0</span>
+                  <span className="font-[800] tracking-[-0.03em] text-[18px] leading-none">Clear+</span>
 
                   {isPremium && <span className="app-accent-soft hidden sm:inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full"><Crown className="w-3 h-3" /> PLUS</span>}
                   <button onClick={() => { setActiveTab('dashboard') }} className="hidden sm:flex text-[10px] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-white/40 hover:text-white/70">Home</button>
@@ -864,7 +919,7 @@ export default function App() {
                 <div className="app-accent-dot w-2 h-2 rounded-full animate-pulse" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
               </div>
               {!isPremium ? (
-                <button onClick={() => openPaywall('clear-plus1.0 Premium')} className="app-accent-fill h-9 px-4 rounded-full text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition">
+                <button onClick={() => openPaywall('Clear+ Premium')} className="app-accent-fill h-9 px-4 rounded-full text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition">
                   <Crown className="w-4 h-4" /> Upgrade
                 </button>
               ) : (
@@ -885,19 +940,19 @@ export default function App() {
           )}
 
           <main key={activeTab} className="tab-panel relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
-            {activeTab === 'dashboard' && <Remodel quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('clear-plus1.0 Premium')} />}
+            {activeTab === 'dashboard' && <Remodel region={region} currency={currency} signedIn={!!user} quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('Clear+ Premium')} />}
             {activeTab === 'analytics' && (
                 <div className="lg:col-span-5 space-y-6">
                   {/* Premium Analytics */}
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] overflow-hidden relative">
                     <div className="p-5 flex items-center justify-between">
-                      <div className="flex items-center gap-2"><div className="w-7 h-7 rounded-[9px] bg-violet-500/15 border border-violet-500/20 flex items-center justify-center"><BarChart3 className="w-4 h-4 text-violet-300" /></div><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Premium Analytics</h2></div>
-                      {!isPremium && <span className="text-[10px] px-2 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-center gap-1"><Lock className="w-3 h-3" /> LOCKED</span>}
+                      <div className="flex items-center gap-2"><div data-premium-accent="analytics" className="app-accent-soft premium-accent-tile w-7 h-7 rounded-[9px] flex items-center justify-center"><BarChart3 className="app-accent-icon w-4 h-4" /></div><h2 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase">Premium Analytics</h2></div>
+                      {!isPremium && <span data-premium-accent="locked" className="app-accent-soft premium-accent-tile text-[10px] px-2 py-1 rounded-full flex items-center gap-1"><Lock className="app-accent-icon w-3 h-3" /> LOCKED</span>}
                     </div>
                     <div className="relative">
                       <div className={`${!isPremium ? 'blur-[8px] pointer-events-none select-none' : ''} px-5 pb-5 space-y-5`}>
                         <div className="rounded-[16px] bg-[#0f0f10] border border-white/[0.06] p-4">
-                          <div className="flex items-center justify-between mb-3"><span className="text-[11px] font-bold tracking-widest uppercase text-white/30">Cumulative Savings</span><span className="text-[11px] text-emerald-300 font-bold">${moneySaved.toFixed(0)} total</span></div>
+                          <div className="flex items-center justify-between mb-3"><span className="text-[11px] font-bold tracking-widest uppercase text-white/30">Cumulative Savings</span><span className="text-[11px] text-emerald-300 font-bold">{money(moneySaved)} total</span></div>
                           <div className="h-[110px] w-full relative">
                             <svg viewBox="0 0 300 100" className="w-full h-full">
                               <defs><linearGradient id="g2" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="var(--theme-accent)" stopOpacity="0.4" /><stop offset="100%" stopColor="var(--theme-accent)" stopOpacity="0" /></linearGradient></defs>
@@ -916,11 +971,11 @@ export default function App() {
                         </div>
                       </div>
                       {!isPremium && (
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#121214] via-[#121214]/80 to-transparent flex flex-col items-center justify-end p-6 text-center">
-                          <div className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center mb-3 shadow-[0_8px_24px_rgba(255,255,255,0.2)]"><Crown className="w-6 h-6" /></div>
+                        <div className="premium-locked-overlay absolute inset-0 flex flex-col items-center justify-end p-6 text-center">
+                          <div data-premium-accent="crown" className="app-accent-soft premium-accent-tile w-12 h-12 rounded-full flex items-center justify-center mb-3"><Crown className="app-accent-icon w-6 h-6" /></div>
                           <div className="text-[15px] font-bold tracking-[-0.01em]">Unlock Premium Analytics</div>
-                          <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: ${yearlyCost.toFixed(0)} saved.</div>
-                          <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with clear-plus1.0</button>
+                          <div className="text-[12px] text-white/50 mt-1 max-w-[260px] leading-[1.5]">Savings history, future projections and progress rewards. In 1 year: {money(yearlyCost)} saved.</div>
+                          <button onClick={() => openPaywall('Premium Analytics')} className="mt-4 h-11 px-6 rounded-full bg-white text-black font-bold text-[13px] flex items-center gap-2 hover:bg-white/90"><Crown className="w-4 h-4" /> Unlock with Clear+</button>
                         </div>
                       )}
                     </div>
@@ -1012,7 +1067,7 @@ export default function App() {
                     <h3 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase mb-4">Why journaling works</h3>
                     <div className="space-y-3 text-[12px] leading-[1.6] text-white/50">
                       <div className="flex gap-2"><Zap className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" /> Write down what you noticed, what triggered an urge and what helped.</div>
-                      <div className="flex gap-2"><Heart className="w-4 h-4 text-rose-300 shrink-0 mt-0.5" /> Look back for patterns and ideas you want to try again.</div>
+                      <div className="flex gap-2"><Heart className="app-accent-icon w-4 h-4 shrink-0 mt-0.5" /> Look back for patterns and ideas you want to try again.</div>
                     </div>
                   </div>
                   <button onClick={() => setActiveTab('dashboard')} className="dashboard-return w-full min-h-12 rounded-[14px] font-bold text-[14px] flex items-center justify-center gap-2"><LayoutDashboard className="w-4 h-4" /> Back to Dashboard</button>
@@ -1027,7 +1082,7 @@ export default function App() {
                     <div className="rewards-accent-wash absolute inset-0" />
                     <div className="relative p-6 lg:p-7">
                       <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-[10px] bg-amber-500/15 border border-amber-500/20 flex items-center justify-center"><PiggyBank className="w-4 h-4 text-amber-300" /></div><div><h2 className="text-[14px] font-bold">Pledge Jar • Your Savings, Visualized</h2><div className="text-[11px] text-white/40">Fill it with what you don't smoke.</div></div></div>
+                        <div className="flex items-center gap-3"><div className="app-accent-soft w-8 h-8 rounded-[10px] flex items-center justify-center"><PiggyBank className="piggy-accent w-4 h-4" /></div><div><h2 className="text-[14px] font-bold">Pledge Jar • Your Savings, Visualized</h2><div className="text-[11px] text-white/40">Fill it with what you don't smoke.</div></div></div>
                         <button onClick={() => { setShareType('money'); setShowShare(true); }} className="h-9 px-4 rounded-full bg-white text-black text-[12px] font-bold flex items-center gap-1.5"><Share2 className="w-4 h-4" /> Share</button>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-[200px_1fr] gap-6 items-end">
@@ -1035,14 +1090,14 @@ export default function App() {
                           <div className="relative w-[160px] h-[220px] rounded-b-[28px] rounded-t-[12px] border-[3px] border-white/[0.12] bg-white/[0.03] overflow-hidden">
                             <div className="absolute top-0 left-0 right-0 h-[18px] bg-white/[0.08] border-b border-white/[0.10] flex items-center justify-center"><div className="w-10 h-1.5 rounded-full bg-white/20" /></div>
                             <div className="pledge-fill absolute bottom-0 left-0 right-0 transition-all duration-1000 flex items-end justify-center pb-2" style={{ height: `${Math.min(95, (moneySaved / (yearlyCost || 1)) * 100)}%` }}>
-                              <span className="relative text-[10px] font-bold text-black/70">${moneySaved.toFixed(0)}</span>
+                              <span className="relative text-[10px] font-bold text-black/70">{money(moneySaved)}</span>
                             </div>
                           </div>
                         </div>
                         <div className="space-y-4">
                           <div className="grid grid-cols-2 gap-3">
-                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Estimated spending avoided</div><div className="text-[20px] font-[900] mt-1">${moneySaved.toFixed(2)}</div></div>
-                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Yearly goal</div><div className="text-[20px] font-[900] mt-1">${yearlyCost.toFixed(0)}</div><div className="text-[11px] text-emerald-300">{Math.round((moneySaved / yearlyCost) * 100) || 0}% filled</div></div>
+                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Estimated spending avoided</div><div className="text-[20px] font-[900] mt-1">{money(moneySaved)}</div></div>
+                            <div className="rounded-[14px] bg-[#0f0f10] border border-white/[0.06] p-3"><div className="text-[10px] uppercase tracking-widest font-bold text-white/30">Yearly goal</div><div className="text-[20px] font-[900] mt-1">{money(yearlyCost)}</div><div className="text-[11px] text-emerald-300">{Math.round((moneySaved / yearlyCost) * 100) || 0}% filled</div></div>
                           </div>
                           <button onClick={reviewSavingsEstimate} className="w-full h-12 rounded-[14px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-white/90"><Gift className="w-4 h-4" /> Review savings estimate</button>
                         </div>
@@ -1052,7 +1107,7 @@ export default function App() {
                 </div>
                 <div className="lg:col-span-5 space-y-6">
                   <div className="rounded-[24px] bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/[0.08] p-6">
-                    <div className="flex items-center gap-2 mb-3"><Crown className="w-4 h-4 text-amber-300" /><h3 className="text-[13px] font-bold">Share your progress</h3></div>
+                    <div className="flex items-center gap-2 mb-3"><Crown className="app-accent-icon w-4 h-4" /><h3 className="text-[13px] font-bold">Share your progress</h3></div>
                     <div className="text-[12px] leading-[1.6] text-white/50">Share your win and inspire others. 1080x1080 image with website address to www.clear-plus.app. Created on your device.</div>
                     <button onClick={() => { setShareType('money'); setShowShare(true); }} className="mt-4 w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Share2 className="w-4 h-4" /> Generate share image</button>
                   </div>
@@ -1066,6 +1121,21 @@ export default function App() {
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <h2 className="text-[13px] font-bold mb-5 flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</h2>
                     <div className="space-y-6">
+                      <div id="cost-assumptions" className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Country, currency & cost inputs</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                          <label>Country<select aria-label="Country" value={region} onChange={e => { const next = validRegion(e.target.value); setRegion(next); setCurrency(REGIONS[next].currency); }} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{Object.entries(REGIONS).map(([code, config]: [string, any]) => <option key={code} value={code}>{config.name}</option>)}</select></label>
+                          <label>Savings currency<select aria-label="Savings currency" value={currency} onChange={e => setCurrency(e.target.value)} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{CURRENCIES.map(code => <option key={code} value={code}>{code}</option>)}</select></label>
+                        </div>
+                        <p className="text-sm mb-3">Changing currency changes the label, not the numbers. Enter your actual local pack price below. Premium checkout remains priced in AUD.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / day</label><EditableNumberInput aria-label="Cigarettes per day" min={1} max={200} value={cigsPerDay} onValueChange={setCigsPerDay} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / pack</label><EditableNumberInput aria-label="Cigarettes per pack" min={1} max={200} value={packSize} onValueChange={setPackSize} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack {currency}</label><EditableNumberInput aria-label={`Price per pack ${currency}`} min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
+                        <p className="text-[11px] text-white/40 mt-2">Choose a common pack size or type an exact custom amount above.</p>
+                      </div>
                       <div>
                         <label htmlFor="quit-date" className="text-[11px] tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date & Time</label>
                         <input id="quit-date" type="datetime-local"
@@ -1079,18 +1149,9 @@ export default function App() {
                       </div>
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Accent colour</div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="accent-tiles" role="group" aria-label="Accent colour">
                           {THEME_OPTIONS.map(option => (
-                            <button
-                              key={option.id}
-                              type="button"
-                              aria-pressed={appTheme === option.id}
-                              onClick={() => setAppTheme(option.id)}
-                              className={`min-h-11 rounded-[12px] border px-3 py-2 text-[12px] font-bold flex items-center gap-2 ${appTheme === option.id ? 'border-current bg-white/[0.10]' : 'border-white/[0.08] bg-white/[0.03]'}`}
-                            >
-                              <span className="w-4 h-4 rounded-full border border-black/10" style={{ background: option.swatch }} />
-                              {option.label}
-                            </button>
+                            <button key={option.id} type="button" className="accent-tile" aria-label={option.label} title={option.label} aria-pressed={appTheme === option.id} onClick={() => setAppTheme(option.id)} style={{ backgroundColor: option.swatch }} />
                           ))}
                         </div>
                       </div>
@@ -1127,48 +1188,55 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <div id="cost-assumptions" className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
-                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">AU Cost Inputs</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / day</label><EditableNumberInput aria-label="Cigarettes per day" min={1} max={200} value={cigsPerDay} onValueChange={setCigsPerDay} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / pack</label><EditableNumberInput aria-label="Cigarettes per pack" min={1} max={200} value={packSize} onValueChange={setPackSize} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack AUD</label><EditableNumberInput aria-label="Price per pack AUD" min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                        </div>
-                        <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
-                        <p className="text-[11px] text-white/40 mt-2">Choose a common pack size or type an exact custom amount above.</p>
-                      </div>
-
                     </div>
                   </div>
                 </div>
                 <div className="lg:col-span-5 space-y-6">
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <div className="flex items-center gap-2 mb-4"><Cloud className="w-5 h-5 text-sky-300" /><h3 className="text-[14px] font-bold">Account & sync</h3></div>
+                  <p className="text-sm">Sign in using the email on your Stripe receipt to sync your progress and access your account. Free tools do not require an account.</p>
+
                     {user ? (
                       <div className="space-y-4">
+                  <button type="button" onClick={restorePremium} className="min-h-11 rounded-xl border p-3">Restore Premium purchase</button>
+
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4">
                           <div className="text-[11px] uppercase tracking-widest text-white/35 font-bold">Signed in as</div>
                           <div className="text-[13px] font-bold mt-1 break-all">{user.email}</div>
                           <div className="text-[11px] text-white/45 mt-2">
-                            {syncStatus === 'synced' ? '✓ Progress synced' : syncStatus === 'saving' ? 'Syncing changes…' : syncStatus === 'loading' ? 'Loading your progress…' : syncStatus === 'error' ? 'Sync paused — check your connection' : 'Stored on this device'}
+                            {syncStatus === 'synced' ? '✓ Progress synced' : syncStatus === 'saving' ? 'Syncing changes…' : syncStatus === 'loading' ? 'Loading your progress…' : syncStatus === 'error' ? 'Sync paused — ' + syncError : 'Stored on this device'}
                           </div>
                         </div>
-                        <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices.</p>
-                        <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Cloud className="w-4 h-4" /> Sync both devices now</button>
+                        <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices. Up to 3 devices or browsers can stay signed in at once.</p>
+                        <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"><Cloud className="w-4 h-4" /> Refresh this device from cloud</button>
                         <button onClick={signOut} className="w-full h-11 rounded-[12px] bg-white/[0.05] border border-white/[0.10] text-[12px] font-bold flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> Sign out</button>
+                      </div>
+                    ) : pendingUser ? (
+                      <div className="space-y-3" role="status">
+                        <h4 className="text-[14px] font-bold">{deviceError ? 'Device check unavailable' : admission?.revoked ? 'This device was signed out' : 'Three devices are already signed in'}</h4>
+                        <p className="text-[12px]">{deviceError || (admission?.revoked ? 'Sign out here, then request a fresh email link to sign in again.' : 'Choose a device to sign out before using this one. Your cloud progress will not be deleted.')}</p>
+                        {!admission?.revoked && admission?.sessions.map(device => (
+                          <div key={device.id} className="rounded-xl border p-3 space-y-2">
+                            <p className="text-[12px] font-bold">{device.label}</p>
+                            <p className="text-[10px]">Last active: {new Date(device.lastSeen).toLocaleString()}</p>
+                            <button type="button" disabled={deviceBusy} onClick={() => replaceDevice(device.id)} className="min-h-11 w-full rounded-xl border p-2">Sign out this device and use mine</button>
+                          </div>
+                        ))}
+                        {!admission?.revoked && <button type="button" disabled={deviceBusy} onClick={retryAdmission} className="min-h-11 w-full rounded-xl border p-2">{deviceBusy ? 'Checking…' : 'Try again'}</button>}
+                        <button type="button" disabled={deviceBusy} onClick={signOut} className="min-h-11 w-full rounded-xl border p-2">Sign out here</button>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <p className="text-[12px] leading-[1.55] text-white/50">Sign in on your phone and computer to keep progress and premium access together. No extra password required.</p>
+                        <p className="text-[12px] leading-[1.55] text-white/50">Sign in with the same email on your phone and computer, and use the same app address on both. The preview and live app have separate browser storage. No extra password required.</p>
                         <label className="text-[10px] uppercase tracking-widest font-bold text-white/35 block">Email address</label>
                         <input type="email" autoComplete="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') sendSignInLink(); }} placeholder="you@example.com" className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" />
                         <button disabled={authBusy || !authEmail.trim()} onClick={sendSignInLink} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2 disabled:opacity-50"><Mail className="w-4 h-4" /> {authBusy ? 'Sending…' : 'Email me a sign-in link'}</button>
-                        <p className="text-[10px] text-white/35">Use the same email on every device. The link signs you in securely and expires automatically.</p>
+                        <p className="text-[10px] text-white/35">Use the same email on every device. Request a fresh, single-use link on each device. Up to 3 devices or browsers can stay signed in at once.</p>
                       </div>
                     )}
                   </div>
                   <div className="rounded-[24px] bg-[#131315] border border-white/[0.08] p-6">
-                    <div className="flex items-center gap-2 mb-4"><Crown className="w-5 h-5 text-amber-300" /><h3 className="text-[14px] font-bold">Subscription</h3></div>
+                    <div className="flex items-center gap-2 mb-4"><Crown className="app-accent-icon w-5 h-5" /><h3 className="text-[14px] font-bold">Subscription</h3></div>
                     {isPremium ? (
                       <div className="space-y-3">
                         <p>Premium is enabled{user ? ' and linked to your synced account' : ' in this browser'}. To manage or cancel a paid subscription, use the subscription management link in your Stripe receipt.</p>
@@ -1176,7 +1244,7 @@ export default function App() {
                     ) : (
                       <div className="space-y-3">
                         <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="text-[12px] font-bold">Free tier</div><div className="text-[11px] text-white/40 mt-1">Unlimited craving logs, timer, basic savings, 3 guided breathing sessions per day, 7-day history</div></div>
-                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to clear-plus1.0 from $9.99/mo</button>
+                        <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to Clear+ from AUD $9.99/mo</button>
                       </div>
                     )}
                   </div>
@@ -1197,13 +1265,13 @@ export default function App() {
           </main>
 
           <footer className="relative z-10 border-t border-white/[0.06] mt-8 py-4 px-4 lg:px-7 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-white/25">
-            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> clear-plus1.0 • By a former smoker, for future non-smokers • Estimates in AUD • Quitline 13 7848 • {user ? 'Progress synced' : 'Progress saved in this browser'}</div>
-            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • ${moneySaved.toFixed(0)} saved</span></div>
+            <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> Clear+ • By a former smoker, for future non-smokers • Estimates in {currency} • {support.supportName} {support.phone} • {user ? (syncStatus === 'synced' ? 'Progress synced' : syncStatus === 'error' ? 'Progress sync paused' : 'Progress syncing') : 'Progress saved in this browser'}</div>
+            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • AUD $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • {money(moneySaved)} saved</span></div>
           </footer>
         </>
       )}
 
-      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="clear-plus1.0 Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">clear-plus1.0 Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">{user ? 'Progress and verified premium access sync to your signed-in account.' : 'Progress is stored in this browser until you sign in from Settings.'}</p></section></div>}
+      {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="Clear+ Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">Clear+ Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly and yearly plans renew automatically until cancelled. Review the final price and terms in Stripe before paying.</p><p className="mt-3">{user ? 'Progress and verified premium access sync to your signed-in account.' : 'Progress is stored in this browser until you sign in from Settings.'}</p></section></div>}
 
       {/* Share Modal */}
       {showShare && (
@@ -1217,7 +1285,7 @@ export default function App() {
               </div>
 
               <div className="flex gap-2 mb-4">
-                <button onClick={() => setShareType('money')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'money' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>💰 ${moneySaved.toFixed(0)} Saved</button>
+                <button onClick={() => setShareType('money')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'money' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>💰 {money(moneySaved)} Saved</button>
                 <button onClick={() => setShareType('days')} className={`flex-1 h-10 rounded-full text-[12px] font-bold border transition ${shareType === 'days' ? 'bg-white text-black border-white' : 'bg-white/[0.06] border-white/[0.08] text-white/50'}`}>📅 {days} Days Free</button>
               </div>
 
@@ -1241,10 +1309,10 @@ export default function App() {
                     // @ts-ignore
                     if (navigator.canShare && navigator.canShare({ files: [file] })) {
                       // @ts-ignore
-                      await navigator.share({ files: [file], title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is $${moneySaved.toFixed(0)} and quit for ${days} days with clear-plus1.0!` });
+                      await navigator.share({ files: [file], title: 'I quit with Clear+', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with Clear+!` });
                     } else if (navigator.share) {
                       // @ts-ignore
-                      await navigator.share({ title: 'I quit with clear-plus1.0', text: `My estimated spending avoided is $${moneySaved.toFixed(0)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app` });
+                      await navigator.share({ title: 'I quit with Clear+', text: `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with Clear+! www.clear-plus.app` });
                     } else {
                       const url = URL.createObjectURL(blob);
                       window.open(url, '_blank');
@@ -1258,7 +1326,7 @@ export default function App() {
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button onClick={() => {
-                  const text = `My estimated spending avoided is $${moneySaved.toFixed(0)} and quit for ${days} days with clear-plus1.0! www.clear-plus.app`;
+                  const text = `My estimated spending avoided is ${money(moneySaved)} and quit for ${days} days with Clear+! www.clear-plus.app`;
                   const url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://www.clear-plus.app')}&quote=${encodeURIComponent(text)}`;
                   window.open(url, '_blank');
                 }} className="h-10 rounded-[10px] bg-[#1877F2]/15 border border-[#1877F2]/20 text-[#8AB4FF] text-[12px] font-semibold flex items-center justify-center gap-2"><Facebook className="w-4 h-4" /> Facebook</button>
@@ -1314,7 +1382,7 @@ export default function App() {
         <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" onClick={() => setShowInstallHelp(false)} />
           <div className="relative w-full sm:max-w-[420px] rounded-t-[24px] sm:rounded-[24px] bg-[#161618] border border-white/[0.10] p-6">
-            <div className="flex items-center justify-between mb-5"><h3 className="font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Install clear-plus1.0</h3><button onClick={() => setShowInstallHelp(false)} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
+            <div className="flex items-center justify-between mb-5"><h3 className="font-bold flex items-center gap-2"><Download className="w-4 h-4" /> Install Clear+</h3><button onClick={() => setShowInstallHelp(false)} className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center"><X className="w-4 h-4" /></button></div>
             <div className="space-y-4 text-[13px] leading-[1.6] text-white/70">
               <div className="rounded-[14px] bg-white/[0.04] border border-white/[0.06] p-4"><div className="font-bold text-white mb-2">How to install:</div><ul className="space-y-2 text-[12px]"><li><span className="text-white font-medium">Chrome / Edge:</span> Address bar → Install icon or Menu → Install app.</li><li><span className="text-white font-medium">Android:</span> ⋮ → Add to Home screen.</li><li><span className="text-white font-medium">iOS Safari:</span> Share → Add to Home Screen.</li></ul></div>
               <button onClick={() => setShowInstallHelp(false)} className="w-full h-11 rounded-[12px] bg-white text-black font-bold">Got it</button>
