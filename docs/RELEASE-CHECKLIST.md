@@ -85,3 +85,10 @@ Latest branding choice supersedes earlier accent-linked branding: fixed bright b
 - Chrome screenshots exposed a separate asset defect: old v4 192/512/180 PNGs each contained zero opaque white pixels, so the install dialog showed plain blue. This was not solely an OS cache problem. New v6 PNGs were rendered from the original white Wind paths on the unchanged #2563eb background and inspected individually at 512/192/180 and Windows favicon 64/48/32/16 sizes.
 - Pixel decoding tests require visible white artwork (2–20% coverage), validate dimensions and repaired manifest/browser icon references. Root favicon.ico is also generated. Versioned URLs avoid the old blank-image cache; installed Chrome apps may still require approval of their icon update.
 - No auth/device-limit/payment or database schema changes. No customer data was deleted or reset. Prior production rollback is 53e0a59c84c23eac93812fe6c4efeb22160a0af2.
+
+
+## Installed icon compatibility repair
+- Live v6 PNGs contain the original white smoke on bright blue. Historic icon URLs returned 404, so old cached install manifests could not retrieve their named assets.
+- Build now produces exact copies of the verified artwork at unversioned and v1–v5 icon addresses; those routes revalidate. HTML requests manifest.webmanifest?v=7 without changing manifest id, scope, start URL or account storage.
+- Regression checks verify byte-identical aliases and the versioned manifest request. No auth, sync, billing or customer-data changes.
+- Browser/OS installed-icon cache refresh remains user-device QA, not claimed fixed merely from image pixel tests.
