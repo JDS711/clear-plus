@@ -12,3 +12,7 @@ node_modules
 public/icons/favicon-v*.ico
 
 public/favicon.ico
+
+# Compatibility aliases generated from the same verified smoke artwork.
+public/icons/*.png
+public/icons/*.ico

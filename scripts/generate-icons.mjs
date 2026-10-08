@@ -4,3 +4,11 @@ const icons = {"icon-512-v6.png": "iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAAAD0eNT6A
 mkdirSync(new URL('../public/icons/', import.meta.url), { recursive: true });
 for (const [name, bytes] of Object.entries(icons)) writeFileSync(new URL('../public/icons/' + name, import.meta.url), Buffer.from(bytes, 'base64'));
 writeFileSync(new URL('../public/favicon.ico', import.meta.url), Buffer.from(icons['favicon-v6.ico'], 'base64'));
+
+// Keep historic install URLs working: a browser may retain an older manifest.
+for (const version of ['', '-v1', '-v2', '-v3', '-v4', '-v5']) {
+  for (const [stem, current] of [['icon-192', 'icon-192-v6.png'], ['icon-512', 'icon-512-v6.png'], ['apple-touch-icon', 'apple-touch-icon-v6.png']]) {
+    writeFileSync(new URL('../public/icons/' + stem + version + '.png', import.meta.url), Buffer.from(icons[current], 'base64'));
+  }
+  writeFileSync(new URL('../public/icons/favicon' + version + '.ico', import.meta.url), Buffer.from(icons['favicon-v6.ico'], 'base64'));
+}
