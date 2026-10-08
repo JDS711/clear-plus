@@ -1056,7 +1056,7 @@ export default function App() {
                     <h3 className="text-[12px] tracking-[0.14em] font-bold text-white/30 uppercase mb-4">Why journaling works</h3>
                     <div className="space-y-3 text-[12px] leading-[1.6] text-white/50">
                       <div className="flex gap-2"><Zap className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" /> Write down what you noticed, what triggered an urge and what helped.</div>
-                      <div className="flex gap-2"><Heart className="w-4 h-4 text-rose-300 shrink-0 mt-0.5" /> Look back for patterns and ideas you want to try again.</div>
+                      <div className="flex gap-2"><Heart className="app-accent-icon w-4 h-4 shrink-0 mt-0.5" /> Look back for patterns and ideas you want to try again.</div>
                     </div>
                   </div>
                   <button onClick={() => setActiveTab('dashboard')} className="dashboard-return w-full min-h-12 rounded-[14px] font-bold text-[14px] flex items-center justify-center gap-2"><LayoutDashboard className="w-4 h-4" /> Back to Dashboard</button>
@@ -1096,7 +1096,7 @@ export default function App() {
                 </div>
                 <div className="lg:col-span-5 space-y-6">
                   <div className="rounded-[24px] bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/[0.08] p-6">
-                    <div className="flex items-center gap-2 mb-3"><Crown className="w-4 h-4 text-amber-300" /><h3 className="text-[13px] font-bold">Share your progress</h3></div>
+                    <div className="flex items-center gap-2 mb-3"><Crown className="app-accent-icon w-4 h-4" /><h3 className="text-[13px] font-bold">Share your progress</h3></div>
                     <div className="text-[12px] leading-[1.6] text-white/50">Share your win and inspire others. 1080x1080 image with website address to www.clear-plus.app. Created on your device.</div>
                     <button onClick={() => { setShareType('money'); setShowShare(true); }} className="mt-4 w-full h-11 rounded-[12px] bg-white text-black font-bold text-[13px] flex items-center justify-center gap-2"><Share2 className="w-4 h-4" /> Generate share image</button>
                   </div>
@@ -1110,6 +1110,21 @@ export default function App() {
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-6">
                     <h2 className="text-[13px] font-bold mb-5 flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</h2>
                     <div className="space-y-6">
+                      <div id="cost-assumptions" className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Country, currency & cost inputs</div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                          <label>Country<select aria-label="Country" value={region} onChange={e => { const next = validRegion(e.target.value); setRegion(next); setCurrency(REGIONS[next].currency); }} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{Object.entries(REGIONS).map(([code, config]: [string, any]) => <option key={code} value={code}>{config.name}</option>)}</select></label>
+                          <label>Savings currency<select aria-label="Savings currency" value={currency} onChange={e => setCurrency(e.target.value)} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{CURRENCIES.map(code => <option key={code} value={code}>{code}</option>)}</select></label>
+                        </div>
+                        <p className="text-sm mb-3">Changing currency changes the label, not the numbers. Enter your actual local pack price below. Premium checkout remains priced in AUD.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / day</label><EditableNumberInput aria-label="Cigarettes per day" min={1} max={200} value={cigsPerDay} onValueChange={setCigsPerDay} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / pack</label><EditableNumberInput aria-label="Cigarettes per pack" min={1} max={200} value={packSize} onValueChange={setPackSize} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack {currency}</label><EditableNumberInput aria-label={`Price per pack ${currency}`} min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
+                        <p className="text-[11px] text-white/40 mt-2">Choose a common pack size or type an exact custom amount above.</p>
+                      </div>
                       <div>
                         <label htmlFor="quit-date" className="text-[11px] tracking-widest uppercase font-bold text-white/30 mb-2 block">Quit Date & Time</label>
                         <input id="quit-date" type="datetime-local"
@@ -1162,22 +1177,6 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <div id="cost-assumptions" className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
-                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Country, currency & cost inputs</div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
-                          <label>Country<select aria-label="Country" value={region} onChange={e => { const next = validRegion(e.target.value); setRegion(next); setCurrency(REGIONS[next].currency); }} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{Object.entries(REGIONS).map(([code, config]: [string, any]) => <option key={code} value={code}>{config.name}</option>)}</select></label>
-                          <label>Savings currency<select aria-label="Savings currency" value={currency} onChange={e => setCurrency(e.target.value)} className="block w-full min-h-11 rounded-xl p-2 text-black bg-white">{CURRENCIES.map(code => <option key={code} value={code}>{code}</option>)}</select></label>
-                        </div>
-                        <p className="text-sm mb-3">Changing currency changes the label, not the numbers. Enter your actual local pack price below. Premium checkout remains priced in AUD.</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / day</label><EditableNumberInput aria-label="Cigarettes per day" min={1} max={200} value={cigsPerDay} onValueChange={setCigsPerDay} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Cigarettes / pack</label><EditableNumberInput aria-label="Cigarettes per pack" min={1} max={200} value={packSize} onValueChange={setPackSize} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                          <div><label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Price / pack {currency}</label><EditableNumberInput aria-label={`Price per pack ${currency}`} min={0} max={10000} step={0.01} value={costPerPack} onValueChange={setCostPerPack} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" /></div>
-                        </div>
-                        <div className="mt-3 grid grid-cols-5 gap-1.5">{[20, 25, 30, 40, 50].map(size => (<button key={size} onClick={() => setPackSize(size)} className={`min-h-10 rounded-[12px] text-[12px] font-bold border ${packSize === size ? 'bg-white text-black border-white' : 'bg-[#0f0f10] border-white/[0.10] text-white/60'}`}>{size}</button>))}</div>
-                        <p className="text-[11px] text-white/40 mt-2">Choose a common pack size or type an exact custom amount above.</p>
-                      </div>
-
                     </div>
                   </div>
                 </div>
@@ -1211,7 +1210,7 @@ export default function App() {
                     )}
                   </div>
                   <div className="rounded-[24px] bg-[#131315] border border-white/[0.08] p-6">
-                    <div className="flex items-center gap-2 mb-4"><Crown className="w-5 h-5 text-amber-300" /><h3 className="text-[14px] font-bold">Subscription</h3></div>
+                    <div className="flex items-center gap-2 mb-4"><Crown className="app-accent-icon w-5 h-5" /><h3 className="text-[14px] font-bold">Subscription</h3></div>
                     {isPremium ? (
                       <div className="space-y-3">
                         <p>Premium is enabled{user ? ' and linked to your synced account' : ' in this browser'}. To manage or cancel a paid subscription, use the subscription management link in your Stripe receipt.</p>

@@ -53,3 +53,4 @@ body:has(.clear-shell[data-display-mode="night"]){background:#181a1e!important;c
 .clear-shell .accent-tile[aria-pressed="true"]{outline:3px solid var(--theme-text);outline-offset:3px;border-color:var(--theme-surface)}
 .clear-shell .accent-tile:focus-visible{outline:3px solid var(--theme-text);outline-offset:3px}
 .clear-shell .piggy-accent{color:var(--theme-accent)}
+.app-accent-icon{color:var(--theme-accent)}
