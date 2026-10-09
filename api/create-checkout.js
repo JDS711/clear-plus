@@ -2,6 +2,7 @@ import { authenticatedUser } from '../lib/auth.js';
 import Stripe from 'stripe';
 import { prices, isKnownPlan } from '../lib/prices.js';
 import { PLAN_BILLING, isPriceIdShaped, redactKeyLike } from '../lib/plans.js';
+import { MONTHLY_TRIAL_DAYS } from '../lib/trials.js';
 
 // Re-exported for backwards compatibility; the map now lives in lib/prices.js so that the
 // checkout and the verification cannot disagree about what a plan costs.
@@ -16,6 +17,36 @@ export { prices };
  */
 const reasonFor = (err) => err?.code || err?.type || 'unknown';
 
+// Pure builder for regression tests; the handler supplies verified server-side identity.
+export function checkoutParameters(plan, priceId, user) {
+  const userId = user.id;
+  const customerEmail = user.email;
+  const metadata = { billing_type: plan, supabase_user_id: userId };
+  if (plan === 'monthly') metadata.trial_period_days = String(MONTHLY_TRIAL_DAYS);
+  return {
+    mode: PLAN_BILLING[plan],
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: 'https://www.clear-plus.app/?session_id={CHECKOUT_SESSION_ID}',
+    cancel_url: 'https://www.clear-plus.app/?canceled=true',
+    allow_promotion_codes: true,
+    customer_email: customerEmail,
+    ...(plan === 'lifetime' ? { customer_creation: 'always' } : {}),
+    ...(plan === 'monthly' ? {
+      payment_method_collection: 'always',
+      subscription_data: {
+        trial_period_days: MONTHLY_TRIAL_DAYS,
+        trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
+        metadata,
+      },
+      custom_text: { submit: {
+        message: 'AUD $0 due today. 30 days free, then AUD $9.99/month. Renews automatically until cancelled. Cancel before the displayed first billing date to avoid the first charge.',
+      } },
+    } : {}),
+    client_reference_id: userId,
+    metadata,
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -23,8 +54,6 @@ export default async function handler(req, res) {
   let user;
   try { user = await authenticatedUser(req); } catch { return res.status(503).json({ error: 'Sign-in verification unavailable' }); }
   if (!user) return res.status(401).json({ error: 'Sign in before upgrading' });
-  const customerEmail = user.email;
-  const userId = user.id;
   if (!isKnownPlan(plan)) return res.status(400).json({ error: 'Invalid plan' });
   if (!process.env.STRIPE_SECRET_KEY) return res.status(503).json({ error: 'Checkout temporarily unavailable' });
 
@@ -50,18 +79,7 @@ export default async function handler(req, res) {
 
   try {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-    const session = await stripe.checkout.sessions.create({
-      // The mode comes from one shared map, so it cannot drift from what availability checks.
-      mode: PLAN_BILLING[plan],
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: 'https://www.clear-plus.app/?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: 'https://www.clear-plus.app/?canceled=true',
-      allow_promotion_codes: true,
-      customer_email: customerEmail,
-      ...(plan === 'lifetime' ? { customer_creation: 'always' } : {}),
-      client_reference_id: userId,
-      metadata: { billing_type: plan, ...(userId ? { supabase_user_id: userId } : {}) },
-    });
+    const session = await stripe.checkout.sessions.create(checkoutParameters(plan, priceId, user));
     return res.status(200).json({ url: session.url });
   } catch (err) {
     // Never swallow this again. A bare `catch {}` here is the reason a misconfigured lifetime
