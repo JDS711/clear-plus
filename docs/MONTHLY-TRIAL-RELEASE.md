@@ -15,7 +15,7 @@ This change is a pull request only. Do not merge or deploy until the following c
 1. Keep STRIPE_SECRET_KEY server-side. Set STRIPE_MONTHLY_PRICE_ID to the AUD $9.99 monthly price in production; for preview, use a matching TEST price and TEST secret. Never use live billing credentials for automated tests.
 2. Production monthly price: price_1UGa3KRsZqvWlIOHvkRsX1TM. Confirm AUD, amount 999 and recurring interval month in Stripe before release. The repository retains its existing live-price fallback; preview must override it.
 3. Configure preview-only return URLs before provider integration testing. The existing checkout redirect URLs intentionally target production; this PR does not change them.
-4. Confirm an accessible cancellation path and customer-support/refund terms before launch. This patch does not add a billing portal, refund policy or reminder emails. Configure and test Stripe trial-end reminders separately.
+4. Test Settings → Manage subscription / Cancel, including a trial and a failed-payment account. The server derives the Stripe customer from an owned recurring purchase, not browser-submitted card/customer data. Cancellation is effective at the end of the trial/current billing period; it does not automatically refund prior payments. Customer-support/refund terms and reminder emails still require review.
 5. In Stripe TEST mode verify card collection, $0 initial invoice, displayed first billing date, 30-day trial, sign-in ownership, refresh and cross-device restore. Advance a test clock through the trial end and check the first AUD $9.99 invoice and access.
 6. Test cancellation during trial, exact trial expiry, missing payment method, failed first payment, later successful payment, partial/full refunds and disputes. Existing non-trial monthly/yearly/lifetime regression checks remain required.
 7. Test eligible Apple Pay/Google Pay on supported devices. Wallet visibility and recurring authorisation are not certified by mocked unit tests.
@@ -23,3 +23,11 @@ This change is a pull request only. Do not merge or deploy until the following c
 
 ## Rollback
 Revert this code change if needed. Existing Stripe subscriptions and their trial-end dates are not changed by a code rollback and must be managed deliberately in Stripe; do not cancel or charge customers as part of an automatic rollback.
+
+## Billing portal configuration
+Create a dedicated Stripe portal configuration in each environment with metadata app_policy=clear-plus-cancel-v1. Require subscription_cancel enabled, mode at_period_end, and proration_behavior none. Enable invoice history and payment-method updates; leave customer-email changes and plan changes disabled. Creation of a configuration does not cancel existing subscriptions.
+
+Set STRIPE_PORTAL_CONFIGURATION_ID server-side if desired. Otherwise the app selects a matching active configuration from the first 100 returned by Stripe. It never silently uses an unrelated default or an immediate-cancel configuration. Test mode needs its own configuration.
+
+The manage control remains available without paid Premium, so a failed payment cannot block cancellation. If the stored session is missing, discovery searches up to 10 matching-email customers and 50 recent sessions each; every purchase still requires matching signed-in account ownership. Older purchases outside those limits may require support. Checkout and portal return URLs currently target production; set preview-only URLs before real provider testing.
+Live portal configuration prepared: bpc_1UOkzmRsZqvWlIOHKg7Vmcey. It is active with the policy marker and at-period-end cancellation; this does not deploy the app or cancel any customer subscription. A separate TEST configuration is still required for provider testing.

@@ -148,6 +148,7 @@ export default function App() {
   // It is now derived from a server check on every load — see the session_id handling below.
   // It starts false and stays false until Stripe says otherwise.
   const [isPremium, setIsPremium] = useState(false);
+  const [billingPortalBusy, setBillingPortalBusy] = useState(false);
   const [activeTab, setActiveTabState] = useState<Tab>(() => tabFromHash());
   const setActiveTab = (tab: Tab) => {
     setActiveTabState(tab);
@@ -684,6 +685,29 @@ export default function App() {
     // Reset only when leaving the breathing experience.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, showSOSFull]);
+  const handleBillingPortal = async () => {
+    if (!user || billingPortalBusy) return;
+    setBillingPortalBusy(true);
+    try {
+      const { data: auth } = await supabase.auth.getSession();
+      if (!auth.session) throw new Error('Sign in again to manage your subscription.');
+      const response = await fetch('/api/create-billing-portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + auth.session.access_token },
+        body: JSON.stringify({ ...(premiumSession ? { sessionId: premiumSession } : {}) }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.url) throw new Error(data.error || 'Billing management is temporarily unavailable.');
+      const destination = new URL(data.url);
+      if (destination.protocol !== 'https:' || destination.hostname !== 'billing.stripe.com') throw new Error('Invalid billing destination.');
+      window.location.assign(destination.href);
+    } catch (error) {
+      pushToast({ title: 'Unable to open billing management', body: error instanceof Error ? error.message : 'Please retry.' });
+    } finally {
+      setBillingPortalBusy(false);
+    }
+  };
+
   const addJournal = () => {
     if (!journalText.trim()) return;
     const next = [{ id: Date.now().toString(), date: new Date(), mood: journalMood, text: journalText.trim() }, ...journals];
@@ -1240,7 +1264,7 @@ export default function App() {
                     <div className="flex items-center gap-2 mb-4"><Crown className="app-accent-icon w-5 h-5" /><h3 className="text-[14px] font-bold">Subscription</h3></div>
                     {isPremium ? (
                       <div className="space-y-3">
-                        <p>Premium is enabled{user ? ' and linked to your synced account' : ' in this browser'}. To manage or cancel a paid subscription, use the subscription management link in your Stripe receipt.</p>
+                        <p>Premium is enabled{user ? ' and linked to your synced account' : ' in this browser'}.{billing === 'lifetime' ? ' Lifetime is a one-off purchase with no automatic renewal.' : ' Manage your payment method or cancel renewal securely in Stripe.'}</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -1248,6 +1272,10 @@ export default function App() {
                         <button onClick={() => openPaywall('Settings Upgrade')} className="w-full h-11 rounded-[12px] bg-white app-readable-text font-bold text-[13px] flex items-center justify-center gap-2"><Crown className="w-4 h-4" /> Upgrade to Clear+ from AUD $9.99/mo</button>
                       </div>
                     )}
+                    {user && !(isPremium && billing === 'lifetime') && <div className="mt-4 space-y-3">
+                      <button type="button" onClick={handleBillingPortal} disabled={billingPortalBusy} className="app-accent-fill w-full min-h-11 rounded-[12px] px-4 py-3 text-[13px] font-bold disabled:opacity-50">{billingPortalBusy ? 'Opening Stripe…' : 'Manage subscription / Cancel'}</button>
+                      <p className="text-[12px]">Cancel renewal in Stripe before your first billing date to avoid the trial charge. Cancellation takes effect at the end of your trial or current billing period; it does not automatically refund earlier payments. This control remains available if a failed payment removes Premium access.</p>
+                    </div>}
                   </div>
                   <div className="rounded-[24px] bg-[#121214] border border-white/[0.06] p-5">
                     <div className="flex items-center gap-2 mb-3"><Smartphone className="w-4 h-4 text-white/60" /><h3 className="text-[12px] font-bold tracking-widest uppercase text-white/30">PWA & Install</h3></div>
