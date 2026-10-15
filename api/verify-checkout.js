@@ -22,6 +22,6 @@ export default async function handler(req, res) {
 
   return res.status(200).json({
     paid: result.paid,
-    ...(result.paid ? { billing: result.billing } : {}),
+    ...(result.paid ? { billing: result.billing, ...(result.trialEnd ? { trialEnd: result.trialEnd } : {}) } : {}),
   });
 }

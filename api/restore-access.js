@@ -16,7 +16,7 @@ export default async function handler(req, res) {
         if (!ownsPurchase(session, user) || session.status !== 'complete') continue;
         const result = await resolveSession(session.id, process.env, user);
         if (!result.ok && result.code >= 500) return res.status(503).json({ paid: false });
-        if (result.paid) return res.status(200).json({ paid: true, billing: result.billing, sessionId: session.id });
+        if (result.paid) return res.status(200).json({ paid: true, billing: result.billing, sessionId: session.id, ...(result.trialEnd ? { trialEnd: result.trialEnd } : {}) });
       }
     }
     // Older one-off sessions may have no Stripe customer. Match verified receipt email only.
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
       if (!ownsPurchase(session, user) || session.status !== 'complete') continue;
       const result = await resolveSession(session.id, process.env, user);
       if (!result.ok && result.code >= 500) return res.status(503).json({ paid: false });
-      if (result.paid) return res.status(200).json({ paid: true, billing: result.billing, sessionId: session.id });
+      if (result.paid) return res.status(200).json({ paid: true, billing: result.billing, sessionId: session.id, ...(result.trialEnd ? { trialEnd: result.trialEnd } : {}) });
     }
     return res.status(200).json({ paid: false });
   } catch { return res.status(503).json({ paid: false }); }

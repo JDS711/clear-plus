@@ -1,3 +1,4 @@
+import { loadAccountEntitlement } from '../lib/account-entitlement.js';
 import { formatJournalTimestamp, journalDateTime } from '../lib/journal-time.js';
 import { REGIONS, CURRENCIES, validRegion, validCurrency, formatMoney } from '../lib/regions.js';
 import Remodel from './Remodel';
@@ -99,15 +100,6 @@ export default function App() {
   });
   const support = REGIONS[region];
   const money = (value: number) => formatMoney(value, currency, region, 0);
-  const verifyPurchase = async (sessionId: string) => {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session) return { paid: false, needsSignIn: true, billing: undefined, temporary: false };
-    const response = await fetch('/api/verify-checkout?session_id=' + encodeURIComponent(sessionId), {
-      headers: { Authorization: 'Bearer ' + data.session.access_token },
-    });
-    if (response.status >= 500) return { paid: false, temporary: true, needsSignIn: false, billing: undefined };
-    return response.json();
-  };
   useEffect(() => {
     try { localStorage.setItem('clear_region', region); localStorage.setItem('clear_currency', currency); } catch {}
   }, [region, currency]);
@@ -148,6 +140,8 @@ export default function App() {
   // It is now derived from a server check on every load — see the session_id handling below.
   // It starts false and stays false until Stripe says otherwise.
   const [isPremium, setIsPremium] = useState(false);
+  const [trialEndsAt, setTrialEndsAt] = useState<number | null>(null);
+  const [entitlementChecking, setEntitlementChecking] = useState(false);
   const [billingPortalBusy, setBillingPortalBusy] = useState(false);
   const [activeTab, setActiveTabState] = useState<Tab>(() => tabFromHash());
   const setActiveTab = (tab: Tab) => {
@@ -233,8 +227,10 @@ export default function App() {
   const lastSyncedStateRef = useRef('');
   const lastSyncedOwnerRef = useRef<string | null>(null);
   const [premiumSession, setPremiumSession] = useState(() => {
-    try { return localStorage.getItem('clear_premium_session') || ''; } catch { return ''; }
+    try { return new URLSearchParams(window.location.search).get('session_id') || localStorage.getItem('clear_premium_session') || ''; } catch { return ''; }
   });
+
+  const checkoutReturnPending = useRef(new URLSearchParams(window.location.search).has('session_id'));
 
   // Share modal
   const [showShare, setShowShare] = useState(false);
@@ -392,17 +388,59 @@ export default function App() {
     } catch {}
   }, [premiumSession]);
 
+  // One account-bound verifier owns Premium state. Wait for device admission/auth,
+  // restore missing/stale checkout references, and ignore superseded requests.
   useEffect(() => {
     let cancelled = false;
-    setIsPremium(false);
-    if (user && premiumSession) {
-      verifyPurchase(premiumSession).then(result => {
-        if (cancelled) return;
-        setIsPremium(!!result.paid);
-        if (result.paid && result.billing) setBilling(result.billing);
-      }).catch(() => {});
-    }
-    return () => { cancelled = true; };
+    let request = 0;
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    setIsPremium(false); setTrialEndsAt(null);
+    if (!user) { setEntitlementChecking(false); return; }
+    const refresh = async () => {
+      const current = ++request;
+      setEntitlementChecking(true);
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (cancelled || current !== request) return;
+        if (!data.session || data.session.user.id !== user.id) {
+          setIsPremium(false); setTrialEndsAt(null); return;
+        }
+        const result = await loadAccountEntitlement(fetch, data.session.access_token, premiumSession);
+        if (cancelled || current !== request) return;
+        // Fail closed on verification failure; retain the session ID for retry.
+        setIsPremium(result.paid === true);
+        setTrialEndsAt(result.paid ? result.trialEnd || null : null);
+        if (expiryTimer) clearTimeout(expiryTimer);
+        if (result.paid) {
+          if (checkoutReturnPending.current) { checkoutReturnPending.current = false; setShowSuccessCelebration(true); }
+          setBilling(result.billing);
+          if (result.sessionId && result.sessionId !== premiumSession) setPremiumSession(result.sessionId);
+          if (result.trialEnd) {
+            expiryTimer = setTimeout(() => {
+              if (Date.now() >= result.trialEnd * 1000) { setIsPremium(false); setTrialEndsAt(null); }
+              void refresh();
+            }, Math.min(2147483647, Math.max(0, result.trialEnd * 1000 - Date.now())));
+          }
+        }
+      } catch {
+        if (!cancelled && current === request) { setIsPremium(false); setTrialEndsAt(null); }
+      } finally {
+        if (!cancelled && current === request) setEntitlementChecking(false);
+      }
+    };
+    const onReturn = () => { if (document.visibilityState === 'visible') void refresh(); };
+    void refresh();
+    const interval = setInterval(onReturn, 60000);
+    window.addEventListener('focus', onReturn);
+    window.addEventListener('online', onReturn);
+    document.addEventListener('visibilitychange', onReturn);
+    return () => {
+      cancelled = true; request++;
+      clearInterval(interval); if (expiryTimer) clearTimeout(expiryTimer);
+      window.removeEventListener('focus', onReturn);
+      window.removeEventListener('online', onReturn);
+      document.removeEventListener('visibilitychange', onReturn);
+    };
   }, [user?.id, premiumSession]);
 
   useEffect(() => {
@@ -507,35 +545,8 @@ export default function App() {
         setPremiumSession(sessionId);
         p.delete('session_id');
         window.history.replaceState(null, '', window.location.pathname + (p.toString() ? '?' + p.toString() : '') + window.location.hash);
-        // Straight after payment. Verify with Stripe, then REMEMBER THE SESSION ID — that is the
-        // credential every future load re-checks. No boolean is stored.
-        verifyPurchase(sessionId).then(data => {
-          if (data.paid) {
-            setIsPremium(true); setBilling(data.billing); setShowSuccessCelebration(true);
-            setPremiumSession(sessionId);
-          } else {
-            pushToast({ title: data.needsSignIn ? 'Sign in to restore Premium' : 'Payment not confirmed', body: data.needsSignIn ? 'Use the email on your payment receipt in Settings.' : 'Please check your payment receipt and retry.' });
-          }
-        }).catch(() => pushToast({ title: 'Unable to verify payment', body: 'Keep your receipt and retry this page.' }));
-      } else {
-        // Every other load: re-verify the stored session against Stripe.
-        //
-        // This is the fix. A hand-written `clear_isPremium` now accomplishes nothing — that key is
-        // never read — and a cancelled or refunded subscription loses access here, instead of
-        // keeping it forever.
-        const storedSession = premiumSession;
-
-        if (storedSession) {
-          verifyPurchase(storedSession).then(data => {
-            setIsPremium(!!data.paid);
-            if (data.paid && data.billing) setBilling(data.billing);
-            // Drop a credential Stripe no longer honours, so we stop re-checking a dead session.
-            if (!data.paid && !data.needsSignIn && !data.temporary) setPremiumSession('');
-          }).catch(() => {
-            // Offline, or the server is unreachable. Premium is deliberately left OFF rather than
-            // trusting local state, because any local grant is forgeable. See the handover note.
-          });
-        }
+        // Verification runs only after signed-in device admission above. Do not race
+        // a mount-time auth request against that account-bound verification.
       }
     } catch {}
   }, []);
@@ -942,12 +953,14 @@ export default function App() {
               <div title="Your smoke-free timer updates automatically." className="hidden sm:flex items-center gap-2 px-3 h-8 rounded-full bg-white/[0.06] border border-white/[0.08]">
                 <div aria-hidden="true" className="app-accent-dot live-progress-dot w-2 h-2 rounded-full" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
               </div>
-              {!isPremium ? (
+              {entitlementChecking && !isPremium ? (
+                <span role="status" className="text-[11px]">Checking access…</span>
+              ) : !isPremium ? (
                 <button onClick={() => openPaywall('Clear+ Premium')} className="app-accent-fill h-9 px-4 rounded-full text-[12px] font-bold flex items-center gap-1.5 hover:scale-[1.02] transition">
                   <Crown className="w-4 h-4" /> Upgrade
                 </button>
               ) : (
-                <div className="app-accent-soft h-9 px-3 rounded-full flex items-center gap-1.5 text-[11px]"><Crown className="w-3.5 h-3.5" /> Premium</div>
+                <div className="app-accent-soft h-9 px-3 rounded-full flex items-center gap-1.5 text-[11px]"><Crown className="w-3.5 h-3.5" /> {trialEndsAt ? 'Premium trial' : 'Premium'}</div>
               )}
               <button onClick={() => setMobileNavOpen(!mobileNavOpen)} className="xl:hidden w-9 h-9 rounded-full bg-white/[0.06] border border-white/[0.08] flex items-center justify-center"><Menu className="w-4 h-4" /></button>
             </div>
@@ -1264,6 +1277,7 @@ export default function App() {
                     <div className="flex items-center gap-2 mb-4"><Crown className="app-accent-icon w-5 h-5" /><h3 className="text-[14px] font-bold">Subscription</h3></div>
                     {isPremium ? (
                       <div className="space-y-3">
+                        {trialEndsAt && <p>Premium trial active until {new Date(trialEndsAt * 1000).toLocaleString()}. All Premium features are unlocked during your trial.</p>}
                         <p>Premium is enabled{user ? ' and linked to your synced account' : ' in this browser'}.{billing === 'lifetime' ? ' Lifetime is a one-off purchase with no automatic renewal.' : ' Manage your payment method or cancel renewal securely in Stripe.'}</p>
                       </div>
                     ) : (
@@ -1296,7 +1310,7 @@ export default function App() {
 
           <footer className="relative z-10 border-t border-white/[0.06] mt-8 py-4 px-4 lg:px-7 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-white/25">
             <div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5" /> Clear+ • By a former smoker, for future non-smokers • Estimates in {currency} • {support.supportName} {support.phone} • {user ? (syncStatus === 'synced' ? 'Progress synced' : syncStatus === 'error' ? 'Progress sync paused' : 'Progress syncing') : 'Progress saved in this browser'}</div>
-            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium ? 'Plus • AUD $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • {money(moneySaved)} saved</span></div>
+            <div className="flex items-center gap-3"><span className="px-2 py-1 rounded-full bg-white/[0.04] border border-white/[0.06]">{isPremium && trialEndsAt ? 'Premium trial • until ' + new Date(trialEndsAt * 1000).toLocaleDateString() : isPremium ? 'Plus • AUD $' + (billing === 'lifetime' ? '49.95 lifetime' : billing === 'yearly' ? '29.95/y Best Value' : '9.99/mo') : 'Free tier'}</span><span>{days}d smoke-free • {money(moneySaved)} saved</span></div>
           </footer>
         </>
       )}
