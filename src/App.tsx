@@ -142,6 +142,7 @@ export default function App() {
   const [isPremium, setIsPremium] = useState(false);
   const [trialEndsAt, setTrialEndsAt] = useState<number | null>(null);
   const [entitlementChecking, setEntitlementChecking] = useState(false);
+  const entitlementOwnerRef = useRef<string | null>(null);
   const [billingPortalBusy, setBillingPortalBusy] = useState(false);
   const [activeTab, setActiveTabState] = useState<Tab>(() => tabFromHash());
   const setActiveTab = (tab: Tab) => {
@@ -279,7 +280,7 @@ export default function App() {
   const setTextSize = (value: TextSize) => { markSettingsChanged(); setTextSizeRaw(value); };
 
   const cloudState = useMemo(() => ({
-    version: 5,
+    version: 6,
     quitDateRevision,
     quitDateEditId,
     settingsUpdatedAt,
@@ -297,8 +298,9 @@ export default function App() {
     appFont,
     displayMode,
     textSize,
-    premiumSession: premiumSession || null,
-  }), [quitDateRevision, quitDateEditId, settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, premiumSession]);
+    // Billing references are browser-local hints; account restore handles other devices.
+    premiumSession: null,
+  }), [quitDateRevision, quitDateEditId, settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize]);
 
   latestCloudStateRef.current = cloudState;
 
@@ -335,7 +337,7 @@ export default function App() {
         return item?.id && Number.isFinite(date.getTime()) ? [{ ...item, date }] : [];
       }));
     }
-    if (typeof state.premiumSession === 'string' && state.premiumSession) setPremiumSession(state.premiumSession);
+    // Never replace a verified/local checkout hint with a legacy cloud hint.
   };
 
   // === EFFECTS ===
@@ -393,10 +395,16 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     let request = 0;
+    let inFlight = false;
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-    setIsPremium(false); setTrialEndsAt(null);
+    if (entitlementOwnerRef.current !== (user?.id || null)) {
+      entitlementOwnerRef.current = user?.id || null;
+      setIsPremium(false); setTrialEndsAt(null);
+    }
     if (!user) { setEntitlementChecking(false); return; }
     const refresh = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
       const current = ++request;
       setEntitlementChecking(true);
       try {
@@ -425,6 +433,7 @@ export default function App() {
       } catch {
         if (!cancelled && current === request) { setIsPremium(false); setTrialEndsAt(null); }
       } finally {
+        inFlight = false;
         if (!cancelled && current === request) setEntitlementChecking(false);
       }
     };
@@ -442,6 +451,19 @@ export default function App() {
       document.removeEventListener('visibilitychange', onReturn);
     };
   }, [user?.id, premiumSession]);
+
+  // A pending or superseded background request must not extend the trial deadline.
+  useEffect(() => {
+    if (!trialEndsAt) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const expire = () => {
+      const remaining = trialEndsAt * 1000 - Date.now();
+      if (remaining <= 0) { setIsPremium(false); setTrialEndsAt(null); }
+      else timer = setTimeout(expire, Math.min(2147483647, remaining));
+    };
+    expire();
+    return () => clearTimeout(timer);
+  }, [trialEndsAt, user?.id]);
 
   useEffect(() => {
     if (!user) { setCloudReady(false); setSyncStatus('local'); lastSyncedStateRef.current = ''; lastSyncedOwnerRef.current = null; return; }
