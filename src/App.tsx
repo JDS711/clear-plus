@@ -23,7 +23,7 @@ import {
   MapPin, Upload, Share2, Instagram, Facebook, ExternalLink, QrCode, Copy, ChevronDown, Users, TimerReset,
   BadgeCheck, Rocket, Eye, MousePointerClick, Cloud, LogOut, Mail
 } from 'lucide-react';
-
+// text-black
 type Craving = { id: string; time: Date; intensity: number; trigger: string; passed: boolean; note?: string };
 type JournalEntry = { id: string; date: Date; mood: 'great' | 'ok' | 'tough'; text: string };
 type Toast = { id: string; title: string; body: string };
