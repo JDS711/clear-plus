@@ -1,7 +1,8 @@
 import { loadAccountEntitlement } from '../lib/account-entitlement.js';
 import { formatJournalTimestamp, journalDateTime } from '../lib/journal-time.js';
 import { REGIONS, CURRENCIES, validRegion, validCurrency, formatMoney } from '../lib/regions.js';
-import Remodel from './Remodel';
+import Onboarding from './Onboarding';
+import UrgeSurf from './UrgeSurf';
 import EditableNumberInput from './EditableNumberInput';
 import { supabase, initialAuthLinkIssue } from './supabase';
 import { authLinkIssue } from './authLink';
@@ -33,7 +34,42 @@ type AppTheme = 'green' | 'warm' | 'rose' | 'blue';
 type DisplayMode = 'light' | 'night';
 type TextSize = 'standard' | 'large';
 type AppFont = 'segoe' | 'arial' | 'verdana' | 'trebuchet' | 'georgia' | 'times' | 'comic' | 'courier' | 'calibri' | 'tahoma';
-type SyncStatus = 'local' | 'loading' | 'synced' | 'saving' | 'error';
+type BreathPhase = 'inhale' | 'hold' | 'exhale' | 'rest';
+
+const BREATHING_PATTERNS = {
+  '4-7-8': {
+    label: '4-7-8',
+    description: 'Classic calming pattern',
+    phases: [
+      { phase: 'inhale' as BreathPhase, dur: 4000, label: '4s' },
+      { phase: 'hold' as BreathPhase, dur: 7000, label: '7s' },
+      { phase: 'exhale' as BreathPhase, dur: 8000, label: '8s' },
+      { phase: 'rest' as BreathPhase, dur: 1000, label: '•' },
+    ],
+  },
+  'box': {
+    label: 'Box',
+    description: 'Equal 4-4-4-4 (good for focus)',
+    phases: [
+      { phase: 'inhale' as BreathPhase, dur: 4000, label: '4s' },
+      { phase: 'hold' as BreathPhase, dur: 4000, label: '4s' },
+      { phase: 'exhale' as BreathPhase, dur: 4000, label: '4s' },
+      { phase: 'hold' as BreathPhase, dur: 4000, label: '4s' },
+    ],
+  },
+  'calm': {
+    label: 'Calm',
+    description: 'Gentle 4-4-6',
+    phases: [
+      { phase: 'inhale' as BreathPhase, dur: 4000, label: '4s' },
+      { phase: 'hold' as BreathPhase, dur: 4000, label: '4s' },
+      { phase: 'exhale' as BreathPhase, dur: 6000, label: '6s' },
+      { phase: 'rest' as BreathPhase, dur: 1000, label: '•' },
+    ],
+  },
+} as const;
+
+type BreathingPatternId = keyof typeof BREATHING_PATTERNS;
 
 const THEME_OPTIONS: Array<{ id: AppTheme; label: string; swatch: string }> = [
   { id: 'green', label: 'Green', swatch: '#70b58a' },
@@ -122,7 +158,22 @@ export default function App() {
     } catch {}
     return null;
   });
-  const [cigsPerDay, setCigsPerDayRaw] = useState(() => {
+  const [reasonsToQuit, setReasonsToQuit] = useState<string[]>(() => {
+    try { const raw = localStorage.getItem('clear_reasons'); return raw ? JSON.parse(raw) : []; } catch { return []; }
+  });
+  const [mainTriggers, setMainTriggers] = useState<string[]>(() => {
+    try { const raw = localStorage.getItem('clear_triggers'); return raw ? JSON.parse(raw) : []; } catch { return []; }
+  });
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [gradualMode, setGradualMode] = useState(() => {
+    try { return localStorage.getItem('clear_gradual') === 'true'; } catch { return false; }
+  });
+  const [reductionTarget, setReductionTarget] = useState(() => {
+    try { const v = localStorage.getItem('clear_reductionTarget'); return v ? parseInt(v) : 10; } catch { return 10; }
+  });
+  const [showUrgeSurf, setShowUrgeSurf] = useState(false);
+  const [showSlipConfirm, setShowSlipConfirm] = useState(false);
+  const [slipNote, setSlipNote] = useState('');
     try { const v = localStorage.getItem('clear_cigsPerDay'); return v ? parseInt(v) : 20; } catch { return 20; }
   });
   const [costPerPack, setCostPerPackRaw] = useState(() => {
@@ -201,7 +252,16 @@ export default function App() {
   const [cravingLogOutcome, setCravingLogOutcome] = useState<'logged' | 'beaten'>('logged');
   const [journalText, setJournalText] = useState('');
   const [journalMood, setJournalMood] = useState<JournalEntry['mood']>('ok');
-  const [breathPhase, setBreathPhase] = useState<'inhale' | 'hold' | 'exhale' | 'rest'>('inhale');
+  const [breathPhase, setBreathPhase] = useState<BreathPhase>('inhale');
+  const [breathCountdown, setBreathCountdown] = useState(4);
+  const [breathProgress, setBreathProgress] = useState(1);
+  const [breathSoundsEnabled, setBreathSoundsEnabled] = useState(() => {
+    try { return localStorage.getItem('clear_breathSounds') !== 'false'; } catch { return true; }
+  });
+  const [voiceCuesEnabled, setVoiceCuesEnabled] = useState(() => {
+    try { return localStorage.getItem('clear_voiceCues') !== 'false'; } catch { return true; }
+  });
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const [breathRunning, setBreathRunning] = useState(false);
   const [breathSessionActive, setBreathSessionActive] = useState(false);
   const [breathCount, setBreathCount] = useState(0);
@@ -280,7 +340,7 @@ export default function App() {
   const setTextSize = (value: TextSize) => { markSettingsChanged(); setTextSizeRaw(value); };
 
   const cloudState = useMemo(() => ({
-    version: 6,
+    version: 7,
     quitDateRevision,
     quitDateEditId,
     settingsUpdatedAt,
@@ -298,9 +358,13 @@ export default function App() {
     appFont,
     displayMode,
     textSize,
+    reasonsToQuit,
+    mainTriggers,
+    gradualMode,
+    reductionTarget,
     // Billing references are browser-local hints; account restore handles other devices.
     premiumSession: null,
-  }), [quitDateRevision, quitDateEditId, settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize]);
+  }), [quitDateRevision, quitDateEditId, settingsUpdatedAt, region, currency, quitDate, cigsPerDay, costPerPack, packSize, sosUses, cravings, journals, referral, appTheme, appFont, displayMode, textSize, reasonsToQuit, mainTriggers, gradualMode, reductionTarget]);
 
   latestCloudStateRef.current = cloudState;
 
@@ -324,6 +388,10 @@ export default function App() {
     if (FONT_OPTIONS.some(option => option.id === state.appFont)) setAppFontRaw(state.appFont);
     if (state.displayMode === 'light' || state.displayMode === 'night') setDisplayModeRaw(state.displayMode);
     if (state.textSize === 'standard' || state.textSize === 'large') setTextSizeRaw(state.textSize);
+    if (Array.isArray(state.reasonsToQuit)) setReasonsToQuit(state.reasonsToQuit);
+    if (Array.isArray(state.mainTriggers)) setMainTriggers(state.mainTriggers);
+    if (typeof state.gradualMode === 'boolean') setGradualMode(state.gradualMode);
+    if (Number.isFinite(state.reductionTarget)) setReductionTarget(Math.max(0, state.reductionTarget));
 
     if (Array.isArray(state.cravings)) {
       setCravings(state.cravings.flatMap((item: any) => {
@@ -341,7 +409,18 @@ export default function App() {
   };
 
   // === EFFECTS ===
-  useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === 'app' && reasonsToQuit.length === 0 && !localStorage.getItem('clear_onboardingSeen')) {
+      setShowOnboarding(true);
+      localStorage.setItem('clear_onboardingSeen', 'true');
+    }
+  }, [mode, reasonsToQuit.length]);
 
 
   useEffect(() => {
@@ -356,7 +435,10 @@ export default function App() {
       localStorage.setItem('clear_packSize', String(packSize));
       // `clear_isPremium` is deliberately NOT written any more. Entitlement lives in Stripe, not
       // in the browser; mirroring it here is what made the flag worth forging.
-      localStorage.setItem('clear_sosUses', JSON.stringify({ date: new Date().toDateString(), count: sosUses }));
+      localStorage.setItem('clear_reasons', JSON.stringify(reasonsToQuit));
+      localStorage.setItem('clear_triggers', JSON.stringify(mainTriggers));
+      localStorage.setItem('clear_gradual', String(gradualMode));
+      localStorage.setItem('clear_reductionTarget', String(reductionTarget));
       localStorage.setItem('clear_mode', mode);
       localStorage.setItem('clear_theme', appTheme);
       localStorage.setItem('clear_font', appFont);
@@ -599,15 +681,97 @@ export default function App() {
     return () => { window.removeEventListener('beforeinstallprompt', onBeforeInstall as any); window.removeEventListener('appinstalled', onInstalled); };
   }, []);
 
+  const speakCue = (phase: BreathPhase) => {
+    if (!voiceCuesEnabled || !window.speechSynthesis) return;
+    try {
+      window.speechSynthesis.cancel();
+      const text = phase === 'inhale' ? 'Inhale' : phase === 'hold' ? 'Hold' : phase === 'exhale' ? 'Exhale' : 'Rest';
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.9;
+      utterance.pitch = 1;
+      utterance.volume = 0.7;
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('female')) || voices.find(v => v.lang.startsWith('en'));
+      if (preferred) utterance.voice = preferred;
+      window.speechSynthesis.speak(utterance);
+    } catch {}
+  };
+    if (!breathSoundsEnabled) return;
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const duration = phase === 'inhale' ? 1.6 : phase === 'exhale' ? 2.2 : phase === 'hold' ? 0.4 : 0.3;
+      const bufferSize = Math.floor(ctx.sampleRate * duration);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+
+      // Filtered noise that mimics airflow
+      let last = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        last = last * 0.85 + white * 0.15; // simple low-pass
+        const t = i / bufferSize;
+        let envelope = 1;
+        if (phase === 'inhale') {
+          envelope = Math.sin(t * Math.PI) * 0.7 + 0.3; // rising then soft
+        } else if (phase === 'exhale') {
+          envelope = Math.cos(t * Math.PI / 2) * 0.8 + 0.2; // falling
+        } else {
+          envelope = Math.exp(-t * 4) * 0.4; // short soft pulse for hold/rest
+        }
+        data[i] = last * envelope * 0.35;
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = phase === 'inhale' ? 1200 : phase === 'exhale' ? 800 : 600;
+      filter.Q.value = 0.7;
+      const gain = ctx.createGain();
+      gain.gain.value = phase === 'hold' || phase === 'rest' ? 0.15 : 0.45;
+
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      source.start(ctx.currentTime);
+    } catch {}
+  };
+
   useEffect(() => {
     if (!breathRunning) return;
-    const phases: Array<{ phase: typeof breathPhase; dur: number }> = [
-      { phase: 'inhale', dur: 4000 }, { phase: 'hold', dur: 7000 }, { phase: 'exhale', dur: 8000 }, { phase: 'rest', dur: 1000 },
-    ];
+    playBreathTone(breathPhase);
+    speakCue(breathPhase);
+    const pattern = BREATHING_PATTERNS[breathPattern];
+    const phases = pattern.phases;
     let idx = phases.findIndex(p => p.phase === breathPhase);
-    const timer = setTimeout(() => { const nextIdx = (idx + 1) % phases.length; if (nextIdx === 0) setBreathCount(c => c + 1); setBreathPhase(phases[nextIdx].phase); }, phases[idx].dur);
-    return () => clearTimeout(timer);
-  }, [breathPhase, breathRunning]);
+    if (idx < 0) idx = 0;
+    const phaseDuration = phases[idx].dur;
+    const totalSeconds = Math.ceil(phaseDuration / 1000);
+    setBreathCountdown(totalSeconds);
+    setBreathProgress(1);
+
+    const start = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, phaseDuration - elapsed);
+      setBreathCountdown(Math.ceil(remaining / 1000));
+      setBreathProgress(remaining / phaseDuration);
+    }, 50);
+
+    const timer = setTimeout(() => {
+      const nextIdx = (idx + 1) % phases.length;
+      if (nextIdx === 0) setBreathCount(c => c + 1);
+      setBreathPhase(phases[nextIdx].phase);
+    }, phaseDuration);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timer);
+    };
+  }, [breathPhase, breathRunning, breathPattern, breathSoundsEnabled, voiceCuesEnabled]);
 
   const pushToast = (t: Omit<Toast, 'id'>) => { const id = Date.now().toString() + Math.random().toString(16).slice(2); setToasts(p => [...p.slice(-3), { ...t, id }]); setTimeout(() => setToasts(p => p.filter(x => x.id !== id)), 4000); };
   const openPaywall = (feature: string) => { setPaywallFeature(feature); setShowPaywall(true); };
@@ -693,6 +857,7 @@ export default function App() {
   const toggleBreathing = () => {
     if (breathRunning) {
       setBreathRunning(false);
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
       return;
     }
     if (!breathSessionActive) {
@@ -972,6 +1137,19 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              {user && (
+                <button
+                  onClick={() => {
+                    setSyncRequest(request => request + 1);
+                    pushToast({ title: 'Saving…', body: 'Your progress is being saved.' });
+                  }}
+                  disabled={syncStatus === 'loading' || syncStatus === 'saving'}
+                  className="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-full bg-white/10 border border-white/10 text-[11px] font-bold hover:bg-white/15 disabled:opacity-50"
+                  title="Save progress to cloud"
+                >
+                  <Check className="w-3.5 h-3.5" /> Save
+                </button>
+              )}
               <div title="Your smoke-free timer updates automatically." className="hidden sm:flex items-center gap-2 px-3 h-8 rounded-full bg-white/[0.06] border border-white/[0.08]">
                 <div aria-hidden="true" className="app-accent-dot live-progress-dot w-2 h-2 rounded-full" /><span className="text-[11px] text-white/60">LIVE</span><span className="text-[11px] font-bold">{days}d {hours}h</span>
               </div>
@@ -1001,7 +1179,20 @@ export default function App() {
           <main key={activeTab} className="tab-panel relative z-10 flex-1 w-full max-w-[1280px] mx-auto px-4 lg:px-7 py-6">
             {authLinkNotice && <div className="auth-link-notice" role="alert"><p>{authLinkNotice}</p><button type="button" onClick={() => { setAuthLinkNotice(''); setActiveTab('settings'); }} className="min-h-11 rounded-xl border px-4 mt-2">Go to sign-in settings</button></div>}
 
-            {activeTab === 'dashboard' && <Remodel region={region} currency={currency} signedIn={!!user} quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('Clear+ Premium')} />}
+            {activeTab === 'dashboard' && (
+              <>
+                {journals.length === 0 || new Date(journals[0].date).toDateString() !== new Date().toDateString() ? (
+                  <div className="mb-4 p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-sm">Daily check-in</div>
+                      <div className="text-xs text-white/50">How are you feeling today?</div>
+                    </div>
+                    <button onClick={() => setActiveTab('journal')} className="h-9 px-4 rounded-lg bg-white text-black text-sm font-bold">Check in</button>
+                  </div>
+                ) : null}
+                <Remodel region={region} currency={currency} signedIn={!!user} quitDate={quitDate} setQuitDate={setQuitDate} now={now} cigs={cigsPerDay} pack={packSize} price={costPerPack} setCigs={setCigsPerDay} setPack={setPackSize} setPrice={setCostPerPack} onEditAssumptions={editAssumptions} onLog={() => { setCravingLogOutcome('logged'); setShowCravingForm(true); }} onJournal={() => setActiveTab('journal')} onAnalytics={() => setActiveTab('analytics')} onShare={() => setShowShare(true)} isPremium={isPremium} onUpgrade={() => openPaywall('Clear+ Premium')} />
+              </>
+            )}
             {activeTab === 'analytics' && (
                 <div className="lg:col-span-5 space-y-6">
                   {/* Premium Analytics */}
@@ -1062,22 +1253,85 @@ export default function App() {
                 <div className="lg:col-span-7">
                   <div className="rounded-[28px] bg-[#131315] border border-white/[0.08] p-6 lg:p-8">
                     <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-3"><div className="breathing-icon-tile app-accent-fill w-9 h-9 flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • 4-7-8</div><div className="text-[11px] text-white/40">{isPremium ? 'Premium • Unlimited guided sessions' : `${Math.max(0, FREE_GUIDED_SESSIONS - sosUses)} of ${FREE_GUIDED_SESSIONS} free guided sessions remaining today`} • Craving logs are always free</div></div></div>
+                      <div className="flex items-center gap-3"><div className="breathing-icon-tile app-accent-fill w-9 h-9 flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[14px] font-bold">SOS Breathing • {BREATHING_PATTERNS[breathPattern].label}</div><div className="text-[11px] text-white/40">{isPremium ? 'Premium • Unlimited guided sessions' : `${Math.max(0, FREE_GUIDED_SESSIONS - sosUses)} of ${FREE_GUIDED_SESSIONS} free guided sessions remaining today`} • Craving logs are always free</div></div></div>
                       {!isPremium && sosUses >= FREE_GUIDED_SESSIONS && !breathSessionActive && <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300">Guided limit reached</span>}
                     </div>
                     <div className="flex flex-col items-center text-center py-6">
+                      <div className="flex gap-2 mb-4 items-center justify-center flex-wrap">
+                        {(Object.keys(BREATHING_PATTERNS) as BreathingPatternId[]).map(id => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => { setBreathPattern(id); setBreathPhase('inhale'); setBreathCount(0); }}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border ${breathPattern === id ? 'bg-white text-black border-white' : 'border-white/20 text-white/70'}`}
+                          >
+                            {BREATHING_PATTERNS[id].label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !breathSoundsEnabled;
+                            setBreathSoundsEnabled(next);
+                            try { localStorage.setItem('clear_breathSounds', String(next)); } catch {}
+                          }}
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold border ${breathSoundsEnabled ? 'bg-white/20 border-white/40' : 'border-white/20 text-white/50'}`}
+                          title={breathSoundsEnabled ? 'Air sounds on' : 'Air sounds off'}
+                        >
+                          {breathSoundsEnabled ? '🌬️' : '🌬️×'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !voiceCuesEnabled;
+                            setVoiceCuesEnabled(next);
+                            try { localStorage.setItem('clear_voiceCues', String(next)); } catch {}
+                          }}
+                          className={`px-3 py-1.5 rounded-full text-xs font-bold border ${voiceCuesEnabled ? 'bg-white/20 border-white/40' : 'border-white/20 text-white/50'}`}
+                          title={voiceCuesEnabled ? 'Voice cues on' : 'Voice cues off'}
+                        >
+                          {voiceCuesEnabled ? '🗣️' : '🗣️×'}
+                        </button>
+                      </div>
+                      <div className="text-[11px] text-white/40 mb-2">{BREATHING_PATTERNS[breathPattern].description}</div>
                       <div className="text-[11px] tracking-[0.2em] uppercase font-bold text-white/30">Round {breathCount + 1} • {breathPhase}</div>
                       <div className="mt-2 text-[26px] font-[800] capitalize">{breathPhase === 'inhale' ? 'Breathe in slowly' : breathPhase === 'hold' ? 'Hold' : breathPhase === 'exhale' ? 'Breathe out fully' : 'Rest'}</div>
                       <div className="relative w-[260px] h-[260px] flex items-center justify-center mt-8">
+                        <svg className="absolute w-[260px] h-[260px] -rotate-90" viewBox="0 0 260 260">
+                          <circle cx="130" cy="130" r="118" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="6" />
+                          <circle
+                            cx="130" cy="130" r="118" fill="none"
+                            stroke="currentColor" strokeWidth="6" strokeLinecap="round"
+                            strokeDasharray={2 * Math.PI * 118}
+                            strokeDashoffset={2 * Math.PI * 118 * (1 - (breathRunning ? breathProgress : 1))}
+                            className="transition-all duration-75 ease-linear text-white/60"
+                          />
+                        </svg>
                         <div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} />
                         <div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} />
-                        <div className="breath-orb-copy relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div>
+                        <div className="breath-orb-copy relative z-10 text-center"><div key={breathCountdown} className="text-[42px] font-[900] tabular-nums pulse-num">{breathRunning ? breathCountdown : (BREATHING_PATTERNS[breathPattern].phases.find(p => p.phase === breathPhase) || BREATHING_PATTERNS[breathPattern].phases[0]).label.replace('s','')}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div>
                       </div>
                       <div className="mt-8 flex items-center gap-3">
                         <button onClick={toggleBreathing} className="app-accent-fill h-12 px-6 rounded-full font-bold text-[13px] flex items-center gap-2">
                           {breathRunning ? <><Pause className="w-4 h-4" /> Pause</> : <><Play className="w-4 h-4" /> Start breathing</>}
                         </button>
                         <button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} type="button" className="breathing-reset app-accent-fill h-12 flex items-center justify-center gap-2"><RotateCcw className="w-4 h-4" /> Reset</button>
+                      </div>
+
+                      {reasonsToQuit.length > 0 && (
+                        <div className="mt-8 p-4 rounded-2xl bg-white/5 border border-white/10 text-left">
+                          <div className="text-xs font-bold uppercase tracking-wider text-white/40 mb-2">Remember why</div>
+                          <div className="flex flex-wrap gap-2">
+                            {reasonsToQuit.map(r => <span key={r} className="px-3 py-1 bg-white/10 rounded-full text-sm">{r}</span>)}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mt-6">
+                        <button onClick={() => setShowUrgeSurf(true)} className="w-full h-12 rounded-xl bg-white/10 font-bold text-sm flex items-center justify-center gap-2">
+                          <TimerReset className="w-4 h-4" /> Start 3-minute urge surfing
+                        </button>
+                        {showUrgeSurf && <UrgeSurf onDone={() => { setShowUrgeSurf(false); pushToast({ title: 'Craving passed', body: 'Well done. Log it if you want.' }); }} />}
                       </div>
                     </div>
                     <div className="mt-6">
@@ -1217,7 +1471,29 @@ export default function App() {
                         </div>
                       </div>
                       <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
-                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Display mode</div>
+                        <div className="text-[11px] font-bold tracking-widest uppercase text-white/30 mb-3">Your reasons & triggers</div>
+                        <p className="text-sm text-white/60 mb-3">{reasonsToQuit.length ? reasonsToQuit.join(', ') : 'None set yet'} · Triggers: {mainTriggers.length ? mainTriggers.join(', ') : 'None'}</p>
+                        <button onClick={() => setShowOnboarding(true)} className="h-10 px-4 rounded-lg bg-white/10 text-sm font-bold">Edit reasons & triggers</button>
+                      </div>
+
+                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="text-[11px] font-bold tracking-widest uppercase text-white/30">Gradual reduction mode</div>
+                          <button onClick={() => setGradualMode(g => !g)} className={`h-8 px-3 rounded-full text-xs font-bold ${gradualMode ? 'bg-white text-black' : 'bg-white/10'}`}>
+                            {gradualMode ? 'On' : 'Off'}
+                          </button>
+                        </div>
+                        {gradualMode && (
+                          <div>
+                            <label className="text-[10px] uppercase font-bold text-white/30 mb-1.5 block">Daily target (cigarettes)</label>
+                            <EditableNumberInput aria-label="Reduction target" min={0} max={100} value={reductionTarget} onValueChange={setReductionTarget} className="w-full h-11 px-3 rounded-[12px] bg-[#0f0f10] border border-white/[0.10] text-[13px]" />
+                            <p className="text-xs text-white/40 mt-2">Track against a lower daily target instead of full quit. Savings still calculated from your original rate.</p>
+                          </div>
+                        )}
+                        <button onClick={() => setShowSlipConfirm(true)} className="mt-4 w-full h-11 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-200 text-sm font-bold">Log a setback (reset timer)</button>
+                      </div>
+
+                      <div className="rounded-[16px] bg-white/[0.03] border border-white/[0.06] p-4">
                         <div className="grid grid-cols-2 gap-2">
                           {(['light', 'night'] as const).map(option => (
                             <button key={option} type="button" aria-pressed={displayMode === option} onClick={() => setDisplayMode(option)} className={`min-h-11 rounded-[12px] border px-3 py-2 text-[13px] font-bold capitalize ${displayMode === option ? 'border-current bg-white/[0.10]' : 'border-white/[0.08] bg-white/[0.03]'}`}>{option}</button>
@@ -1269,6 +1545,16 @@ export default function App() {
                         </div>
                         <p className="text-[11px] text-white/45">Your quit date, settings, journals, cravings, achievements and verified premium session follow you between signed-in devices. Up to 3 devices or browsers can stay signed in at once.</p>
                         <button onClick={() => setSyncRequest(request => request + 1)} disabled={syncStatus === 'loading' || syncStatus === 'saving'} className="cloud-sync-button app-accent-fill w-full h-11 rounded-[12px] text-[12px] font-bold flex items-center justify-center gap-2"><Cloud className="w-4 h-4" /> Refresh this device from cloud</button>
+                        <button
+                          onClick={() => {
+                            setSyncRequest(request => request + 1);
+                            pushToast({ title: 'Saving…', body: 'Your progress is being saved to the cloud.' });
+                          }}
+                          disabled={syncStatus === 'loading' || syncStatus === 'saving'}
+                          className="w-full h-11 rounded-[12px] bg-white text-black text-[12px] font-bold flex items-center justify-center gap-2"
+                        >
+                          <Check className="w-4 h-4" /> Save now
+                        </button>
                         <button onClick={signOut} className="w-full h-11 rounded-[12px] bg-white/[0.05] border border-white/[0.10] text-[12px] font-bold flex items-center justify-center gap-2"><LogOut className="w-4 h-4" /> Sign out</button>
                       </div>
                     ) : pendingUser ? (
@@ -1338,6 +1624,41 @@ export default function App() {
       )}
 
       {showPaywall && <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4"><section role="dialog" aria-modal="true" aria-label="Clear+ Premium" className="bg-[#fffdf8] rounded-3xl p-7 max-w-xl w-full max-h-[90vh] overflow-auto"><button className="float-right" aria-label="Close Premium" onClick={() => setShowPaywall(false)}>✕</button><h2 className="text-2xl font-bold">Clear+ Premium</h2><p className="my-4">Craving logging, the timer, calculator and five-minute pause stay free. Premium adds unlimited guided breathing, savings charts and progress rewards.</p><p>{paywallFeature}</p>{(['monthly','yearly','lifetime'] as const).filter(plan => !hiddenPlanSet.has(plan)).map(plan => <button key={plan} className="block w-full border rounded-xl p-4 my-3" onClick={() => handleCheckout(plan)}>{plan === 'monthly' ? 'Monthly · 30 days free, then AUD $9.99/month' : plan === 'yearly' ? 'Yearly · AUD $29.95/year' : 'Lifetime · AUD $49.95 once'}</button>)}{hiddenPlanSet.size > 0 && <p>Temporarily unavailable: {[...hiddenPlanSet].map(l => l === 'lifetime' ? 'Lifetime' : l === 'yearly' ? 'Yearly' : 'Monthly').join(' and ')}. Everything else works as normal.</p>}<p>Monthly: AUD $0 due today. Payment details required upfront. After 30 days, AUD $9.99/month is charged automatically unless cancelled before the displayed first billing date. Monthly and yearly plans renew automatically until cancelled. Review the final price, billing date and terms in Stripe before confirming.</p><p className="mt-4 text-[12px]">For refund support, contact the developer at <a href="mailto:clear.plus.app@gmail.com?subject=Clear%2B%20refund%20support" className="underline break-all">clear.plus.app@gmail.com</a>. Refund requests are reviewed manually. Do not email card details or passwords.</p><p className="mt-3">{user ? 'Progress and verified premium access sync to your signed-in account.' : 'Progress is stored in this browser until you sign in from Settings.'}</p></section></div>}
+
+      <Onboarding
+        open={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+        onComplete={(reasons, triggers) => {
+          setReasonsToQuit(reasons);
+          setMainTriggers(triggers);
+          setShowOnboarding(false);
+          pushToast({ title: 'Saved', body: 'Your reasons and triggers will appear in SOS.' });
+        }}
+        initialReasons={reasonsToQuit}
+        initialTriggers={mainTriggers}
+      />
+
+      {showSlipConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70">
+          <div className="bg-[#121214] border border-white/10 rounded-3xl p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-2">Log a setback</h2>
+            <p className="text-sm text-white/60 mb-4">This resets your smoke-free timer. Your journal and craving history stay. Savings restart from now.</p>
+            <textarea value={slipNote} onChange={e => setSlipNote(e.target.value)} placeholder="Optional note about what happened" className="w-full h-24 bg-white/5 border border-white/10 rounded-lg p-3 text-sm mb-4" />
+            <div className="flex gap-2">
+              <button onClick={() => setShowSlipConfirm(false)} className="flex-1 h-11 rounded-xl bg-white/10">Cancel</button>
+              <button onClick={() => {
+                setQuitDate(new Date());
+                if (slipNote.trim()) {
+                  setJournals(j => [{ id: Date.now().toString(), date: new Date(), mood: 'tough', text: `Setback: ${slipNote}` }, ...j]);
+                }
+                setSlipNote('');
+                setShowSlipConfirm(false);
+                pushToast({ title: 'Timer reset', body: 'History kept. One day at a time.' });
+              }} className="flex-1 h-11 rounded-xl bg-white text-black font-bold">Reset timer</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Share Modal */}
       {showShare && (
@@ -1414,10 +1735,18 @@ export default function App() {
       {showSOSFull && activeTab !== 'sos' && mode === 'app' && (
         <div className="fixed inset-0 z-[60] flex flex-col bg-[#08080a]">
           <div className="sos-accent-wash absolute inset-0" />
-          <div className="relative z-10 flex items-center justify-between p-6"><div className="flex items-center gap-3"><div className="breathing-icon-tile app-accent-fill w-9 h-9 flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[13px] font-bold">Breathing exercise</div><div className="text-[11px] text-white/40">4-7-8 • Craving will pass</div></div></div><button onClick={() => { setShowSOSFull(false); setBreathRunning(false); }} className="w-10 h-10 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><X className="w-5 h-5" /></button></div>
+          <div className="relative z-10 flex items-center justify-between p-6"><div className="flex items-center gap-3"><div className="breathing-icon-tile app-accent-fill w-9 h-9 flex items-center justify-center"><Wind className="w-5 h-5" /></div><div><div className="text-[13px] font-bold">Breathing exercise</div><div className="text-[11px] text-white/40">{BREATHING_PATTERNS[breathPattern].label} • Craving will pass</div></div></div><button onClick={() => { setShowSOSFull(false); setBreathRunning(false); }} className="w-10 h-10 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center"><X className="w-5 h-5" /></button></div>
           <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-8 text-center">
             <div className="mb-8"><div className="text-[11px] tracking-[0.2em] uppercase font-bold text-white/30">Round {breathCount + 1} • {breathPhase}</div><div className="mt-2 text-[28px] font-[800] capitalize">{breathPhase === 'inhale' ? 'Breathe in slowly' : breathPhase === 'hold' ? 'Hold' : breathPhase === 'exhale' ? 'Breathe out fully' : 'Rest'}</div></div>
-            <div className="relative w-[260px] h-[260px] flex items-center justify-center"><div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} /><div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} /><div className="breath-orb-copy relative z-10 text-center"><div className="text-[42px] font-[900] tabular-nums">{breathPhase === 'inhale' ? '4s' : breathPhase === 'hold' ? '7s' : breathPhase === 'exhale' ? '8s' : '•'}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div></div>
+            <div className="relative w-[260px] h-[260px] flex items-center justify-center">
+              <svg className="absolute w-[260px] h-[260px] -rotate-90" viewBox="0 0 260 260">
+                <circle cx="130" cy="130" r="118" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="6" />
+                <circle cx="130" cy="130" r="118" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeDasharray={2 * Math.PI * 118} strokeDashoffset={2 * Math.PI * 118 * (1 - (breathRunning ? breathProgress : 1))} className="transition-all duration-75 ease-linear text-white/60" />
+              </svg>
+              <div className={`absolute rounded-full border border-white/10 transition-all duration-[1000ms] ${breathPhase === 'inhale' ? 'w-[240px] h-[240px] bg-white/[0.06]' : breathPhase === 'hold' ? 'w-[240px] h-[240px] bg-white/[0.08]' : breathPhase === 'exhale' ? 'w-[120px] h-[120px] bg-white/[0.03]' : 'w-[160px] h-[160px] bg-white/[0.04]'}`} />
+              <div className={`breath-orb absolute rounded-full transition-all ease-in-out ${breathPhase === 'inhale' ? 'w-[200px] h-[200px] duration-[4000ms]' : breathPhase === 'hold' ? 'w-[200px] h-[200px] duration-[7000ms]' : breathPhase === 'exhale' ? 'w-[90px] h-[90px] duration-[8000ms]' : 'w-[130px] h-[130px] duration-[1000ms]'}`} />
+              <div className="breath-orb-copy relative z-10 text-center"><div key={breathCountdown} className="text-[42px] font-[900] tabular-nums pulse-num">{breathRunning ? breathCountdown : (BREATHING_PATTERNS[breathPattern].phases.find(p => p.phase === breathPhase) || BREATHING_PATTERNS[breathPattern].phases[0]).label.replace('s','')}</div><div className="text-[11px] tracking-widest uppercase text-white/50 font-bold mt-1">{breathPhase}</div></div>
+            </div>
             <div className="mt-10 flex items-center gap-3"><button onClick={toggleBreathing} className="app-accent-fill h-12 px-6 rounded-full font-bold text-[13px] flex items-center gap-2"><Play className="w-4 h-4" />{breathRunning ? 'Pause' : 'Start'}</button><button onClick={() => { setBreathCount(0); setBreathPhase('inhale'); }} type="button" className="breathing-reset app-accent-fill h-12 flex items-center justify-center gap-2"><RotateCcw className="w-4 h-4" /> Reset</button></div>
           </div>
           <div className="relative z-10 p-6 flex gap-3"><button onClick={beatCurrentCraving} className="app-accent-fill flex-1 h-12 rounded-full font-bold text-[13px] flex items-center justify-center gap-2"><Sparkles className="w-4 h-4" /> I beat the craving</button><button onClick={() => { setShowSOSFull(false); resetBreathing(); }} className="h-12 px-6 rounded-full bg-white/[0.08] border border-white/[0.10] text-[13px]">Close</button></div>
@@ -1459,7 +1788,9 @@ export default function App() {
       )}
 
        <Analytics />
-       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'); .clear-shell, .clear-shell *{font-family:var(--app-font, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial)}`}</style>
+       <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap'); .clear-shell, .clear-shell *{font-family:var(--app-font, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial)}
+@keyframes pulse-num { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.pulse-num { animation: pulse-num 0.45s ease-out; }`}</style>
     </div>
   );
 }
