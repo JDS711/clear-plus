@@ -174,6 +174,7 @@ export default function App() {
   const [showUrgeSurf, setShowUrgeSurf] = useState(false);
   const [showSlipConfirm, setShowSlipConfirm] = useState(false);
   const [slipNote, setSlipNote] = useState('');
+  const [cigsPerDay, setCigsPerDayRaw] = useState(() => {
     try { const v = localStorage.getItem('clear_cigsPerDay'); return v ? parseInt(v) : 20; } catch { return 20; }
   });
   const [costPerPack, setCostPerPackRaw] = useState(() => {
