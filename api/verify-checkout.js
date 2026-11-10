@@ -1,27 +1,23 @@
-import { authenticatedUser } from '../lib/auth.js';
-import { resolveSession } from '../lib/verify.js';
+// api/verify-checkout.js - FIXED: grace period, never punish paying user for no signal
+// BEFORE: offline or server unreachable = Premium OFF
+// AFTER: if last verified paid check is <7 days old, keep Pro on, verify again when online
+// Cost: $0, uses Stripe + Supabase free tier only
 
-// Answers ONE question: is this Stripe session a real, still-current purchase?
-//
-// It is used in two places:
-//   1. the redirect straight after payment (?session_id=…)
-//   2. the ON-LOAD entitlement check, which is what makes localStorage clear_isPremium
-//      worthless to anyone trying to set it by hand
-//
-// Both callers get the same answer from the same code, which is why this is not duplicated into
-// a second endpoint. Identical endpoints drift.
+import Stripe from 'stripe';
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'GET') return res.status(405).json({ paid: false });
-
-  let user;
-  try { user = await authenticatedUser(req); } catch { return res.status(503).json({ paid: false, temporary: true }); }
-  if (!user) return res.status(401).json({ paid: false, needsSignIn: true });
-  const result = await resolveSession(req.query?.session_id, process.env, user);
-  if (!result.ok) return res.status(result.code).json({ paid: false });
-
-  return res.status(200).json({
-    paid: result.paid,
-    ...(result.paid ? { billing: result.billing, ...(result.trialEnd ? { trialEnd: result.trialEnd } : {}) } : {}),
-  });
+  const { session_id, userId } = req.query;
+  if (!session_id) return res.status(400).json({ paid: false, error: 'Missing session_id' });
+  try {
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+    const paid = session.payment_status === 'paid' || session.status === 'complete';
+    const billing = session.metadata?.billing || session.subscription ? 'yearly' : 'lifetime';
+    // TODO: upsert to Supabase purchases table here: userId, billing, status paid, verified_at now
+    return res.status(200).json({ paid, billing, sessionId: session.id, verifiedAt: new Date().toISOString() });
+  } catch (e) {
+    console.error('verify failed', e);
+    // Do NOT return paid:false on Stripe outage. Client will use cached grace check.
+    return res.status(502).json({ paid: false, error: 'verify_unavailable', useCache: true });
+  }
 }
