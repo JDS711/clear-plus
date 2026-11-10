@@ -1794,4 +1794,3 @@ export default function App() {
 .pulse-num { animation: pulse-num 0.45s ease-out; }`}</style>
     </div>
   );
-}
